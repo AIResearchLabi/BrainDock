@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Module outputs (generated, not source)
+output/
+
+# Session files
+.spec_agent_session.json
+
+# Environment
+.env
+.env.local
+
+# Claude Code
+.claude/
+
+# Misc
+.last_active
+.last_activity
