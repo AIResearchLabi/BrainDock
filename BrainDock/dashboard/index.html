@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BrainDock — Pipeline Dashboard</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #242836;
+    --border: #2e3348;
+    --text: #e1e4ed;
+    --text-dim: #8b8fa3;
+    --accent: #6c7bff;
+    --green: #34d399;
+    --red: #f87171;
+    --yellow: #fbbf24;
+    --cyan: #22d3ee;
+    --purple: #a78bfa;
+    --orange: #fb923c;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  /* ─── Header ─── */
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  header h1 {
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.5px;
+  }
+
+  header h1 span { color: var(--accent); }
+
+  .header-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    animation: pulse-dot 2s infinite;
+  }
+
+  .status-dot.disconnected { background: var(--red); animation: none; }
+
+  .status-label { font-size: 12px; color: var(--text-dim); }
+
+  .btn {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .btn:hover { background: var(--border); }
+
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  /* ─── Stats Bar ─── */
+  .stats-bar {
+    display: flex;
+    gap: 24px;
+    padding: 12px 24px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+
+  .stat {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+  }
+
+  .stat-value {
+    font-weight: 700;
+    font-size: 16px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stat-label { color: var(--text-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  /* ─── Pipeline Flow ─── */
+  .pipeline-section {
+    padding: 20px 24px;
+  }
+
+  .section-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    margin-bottom: 14px;
+    font-weight: 600;
+  }
+
+  .pipeline-flow {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    overflow-x: auto;
+    padding: 10px 0 20px;
+  }
+
+  .mode-node {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .mode-circle {
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    border: 2px solid var(--border);
+    background: var(--surface);
+    color: var(--text-dim);
+    transition: all 0.3s;
+    position: relative;
+  }
+
+  .mode-circle.completed {
+    border-color: var(--green);
+    background: rgba(52, 211, 153, 0.12);
+    color: var(--green);
+  }
+
+  .mode-circle.active {
+    border-color: var(--accent);
+    background: rgba(108, 123, 255, 0.15);
+    color: var(--accent);
+    box-shadow: 0 0 20px rgba(108, 123, 255, 0.3);
+    animation: pulse-ring 2s infinite;
+  }
+
+  @keyframes pulse-ring {
+    0%, 100% { box-shadow: 0 0 10px rgba(108, 123, 255, 0.2); }
+    50% { box-shadow: 0 0 25px rgba(108, 123, 255, 0.45); }
+  }
+
+  .mode-label {
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+
+  .mode-circle.active + .mode-label,
+  .mode-node .mode-circle.active ~ .mode-label { color: var(--accent); }
+
+  .mode-connector {
+    width: 32px;
+    height: 2px;
+    background: var(--border);
+    flex-shrink: 0;
+    position: relative;
+    top: -10px;
+  }
+
+  .mode-connector.done { background: var(--green); }
+
+  .feedback-arrow {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    flex-shrink: 0;
+    position: relative;
+    top: -10px;
+  }
+
+  .feedback-arrow .arrow-line {
+    width: 20px; height: 2px;
+    background: var(--border);
+  }
+
+  .feedback-arrow .arrow-label {
+    font-size: 8px;
+    color: var(--text-dim);
+    padding: 2px 5px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+
+  /* ─── Main Grid ─── */
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    padding: 0 24px 24px;
+  }
+
+  @media (max-width: 900px) {
+    .main-grid { grid-template-columns: 1fr; }
+  }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .panel-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .panel-title {
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .panel-badge {
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--surface2);
+    color: var(--text-dim);
+  }
+
+  .panel-body {
+    padding: 16px;
+    max-height: 400px;
+    overflow-y: auto;
+  }
+
+  .panel-body::-webkit-scrollbar { width: 4px; }
+  .panel-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  /* ─── Task Graph Panel ─── */
+  .wave-group { margin-bottom: 14px; }
+
+  .wave-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+
+  .task-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    margin-bottom: 3px;
+    background: var(--surface2);
+  }
+
+  .task-status {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .task-status.pending { background: var(--text-dim); }
+  .task-status.in_progress { background: var(--yellow); animation: pulse-dot 1.5s infinite; }
+  .task-status.completed { background: var(--green); }
+  .task-status.failed { background: var(--red); }
+
+  .task-title { flex: 1; color: var(--text); }
+  .task-deps { font-size: 10px; color: var(--text-dim); }
+
+  /* ─── Active Agent Panel ─── */
+  .active-agent-info {
+    text-align: center;
+    padding: 20px;
+  }
+
+  .agent-mode {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--accent);
+    text-transform: capitalize;
+    margin-bottom: 8px;
+  }
+
+  .agent-detail {
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.6;
+  }
+
+  .agent-detail strong { color: var(--text); }
+
+  .empty-state {
+    text-align: center;
+    padding: 30px;
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+
+  /* ─── Results Panel ─── */
+  .result-card {
+    background: var(--surface2);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    overflow: hidden;
+  }
+
+  .result-card-header {
+    padding: 10px 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 13px;
+    font-weight: 500;
+    user-select: none;
+  }
+
+  .result-card-header:hover { background: rgba(255,255,255,0.03); }
+
+  .result-card-chevron {
+    font-size: 10px;
+    color: var(--text-dim);
+    transition: transform 0.2s;
+  }
+
+  .result-card.open .result-card-chevron { transform: rotate(90deg); }
+
+  .result-card-body {
+    display: none;
+    padding: 0 14px 12px;
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.6;
+  }
+
+  .result-card.open .result-card-body { display: block; }
+
+  .result-card-body pre {
+    background: var(--bg);
+    padding: 8px 10px;
+    border-radius: 4px;
+    overflow-x: auto;
+    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 11px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin-top: 6px;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .tag {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+
+  .tag-green { background: rgba(52,211,153,0.15); color: var(--green); }
+  .tag-red { background: rgba(248,113,113,0.15); color: var(--red); }
+  .tag-yellow { background: rgba(251,191,36,0.15); color: var(--yellow); }
+  .tag-blue { background: rgba(108,123,255,0.15); color: var(--accent); }
+  .tag-purple { background: rgba(167,139,250,0.15); color: var(--purple); }
+
+  /* ─── Full-width panel ─── */
+  .full-width { grid-column: 1 / -1; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1><span>Brain</span>Dock <span style="font-weight:300;color:var(--text-dim);font-size:14px;">Pipeline Dashboard</span></h1>
+  <div class="header-controls">
+    <div class="status-dot" id="statusDot"></div>
+    <span class="status-label" id="statusLabel">Connecting...</span>
+    <button class="btn" onclick="fetchState()">Refresh</button>
+  </div>
+</header>
+
+<!-- Stats Bar -->
+<div class="stats-bar" id="statsBar">
+  <div class="stat">
+    <span class="stat-value" id="statCompleted" style="color:var(--green)">0</span>
+    <span class="stat-label">Completed</span>
+  </div>
+  <div class="stat">
+    <span class="stat-value" id="statFailed" style="color:var(--red)">0</span>
+    <span class="stat-label">Failed</span>
+  </div>
+  <div class="stat">
+    <span class="stat-value" id="statTotal">0</span>
+    <span class="stat-label">Total Tasks</span>
+  </div>
+  <div class="stat">
+    <span class="stat-value" id="statSkills" style="color:var(--cyan)">0</span>
+    <span class="stat-label">Skills Learned</span>
+  </div>
+  <div class="stat">
+    <span class="stat-value" id="statReflections" style="color:var(--yellow)">0</span>
+    <span class="stat-label">Reflections</span>
+  </div>
+  <div class="stat">
+    <span class="stat-value" id="statDebates" style="color:var(--purple)">0</span>
+    <span class="stat-label">Debates</span>
+  </div>
+</div>
+
+<!-- Pipeline Flow -->
+<div class="pipeline-section">
+  <div class="section-title">Pipeline Flow</div>
+  <div class="pipeline-flow" id="pipelineFlow"></div>
+</div>
+
+<!-- Main Grid -->
+<div class="main-grid">
+  <!-- Active Agent Panel -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">Active Agent</span>
+      <span class="panel-badge" id="currentModeBadge">—</span>
+    </div>
+    <div class="panel-body" id="activeAgentBody">
+      <div class="empty-state">Waiting for pipeline to start...</div>
+    </div>
+  </div>
+
+  <!-- Task Graph Panel -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">Task Graph</span>
+      <span class="panel-badge" id="taskCountBadge">0 tasks</span>
+    </div>
+    <div class="panel-body" id="taskGraphBody">
+      <div class="empty-state">No tasks yet</div>
+    </div>
+  </div>
+
+  <!-- Results Panel -->
+  <div class="panel full-width">
+    <div class="panel-header">
+      <span class="panel-title">Results</span>
+    </div>
+    <div class="panel-body" id="resultsBody">
+      <div class="empty-state">Results will appear as the pipeline runs</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const MODES = [
+  { key: 'specification', label: 'Spec', num: 1 },
+  { key: 'task_graph', label: 'Tasks', num: 2 },
+  { key: 'planning', label: 'Plan', num: 3 },
+  { key: 'controller', label: 'Gate', num: 4 },
+  { key: 'execution', label: 'Exec', num: 5 },
+  { key: 'skill_learning', label: 'Learn', num: 6 },
+  { key: 'reflection', label: 'Reflect', num: 7 },
+  { key: 'debate', label: 'Debate', num: 8 },
+];
+
+const MODE_ORDER = {};
+MODES.forEach((m, i) => MODE_ORDER[m.key] = i);
+
+let lastState = null;
+let connected = false;
+
+// ─── Pipeline Flow Rendering ───
+function renderPipelineFlow(state) {
+  const container = document.getElementById('pipelineFlow');
+  container.innerHTML = '';
+
+  const currentIdx = MODE_ORDER[state.current_mode] ?? -1;
+  // Track which modes have been visited
+  const visited = new Set();
+  if (state.spec && Object.keys(state.spec).length) visited.add('specification');
+  if (state.task_graph && (state.task_graph.tasks || []).length) visited.add('task_graph');
+  if ((state.plans || []).length) { visited.add('planning'); visited.add('controller'); }
+  if ((state.execution_results || []).length) visited.add('execution');
+  if ((state.learned_skills || []).length) visited.add('skill_learning');
+  if ((state.reflections || []).length) visited.add('reflection');
+  if ((state.debates || []).length) visited.add('debate');
+
+  MODES.forEach((mode, i) => {
+    // Node
+    const node = document.createElement('div');
+    node.className = 'mode-node';
+
+    const circle = document.createElement('div');
+    circle.className = 'mode-circle';
+    if (mode.key === state.current_mode) {
+      circle.classList.add('active');
+    } else if (visited.has(mode.key) || i < currentIdx) {
+      circle.classList.add('completed');
+    }
+    circle.textContent = mode.num;
+
+    const label = document.createElement('div');
+    label.className = 'mode-label';
+    label.textContent = mode.label;
+
+    node.appendChild(circle);
+    node.appendChild(label);
+    container.appendChild(node);
+
+    // Connector (except after last or special feedback)
+    if (i < MODES.length - 1) {
+      // Add feedback arrows for reflection/debate paths
+      if (mode.key === 'execution') {
+        const fb = document.createElement('div');
+        fb.className = 'feedback-arrow';
+        const line = document.createElement('div');
+        line.className = 'arrow-line';
+        const lbl = document.createElement('div');
+        lbl.className = 'arrow-label';
+        lbl.textContent = 'fail → reflect';
+        if ((state.reflections || []).length) lbl.style.color = 'var(--yellow)';
+        fb.appendChild(line);
+        fb.appendChild(lbl);
+        const line2 = document.createElement('div');
+        line2.className = 'arrow-line';
+        fb.appendChild(line2);
+        container.appendChild(fb);
+      } else if (mode.key === 'controller') {
+        const fb = document.createElement('div');
+        fb.className = 'feedback-arrow';
+        const line = document.createElement('div');
+        line.className = 'arrow-line';
+        const lbl = document.createElement('div');
+        lbl.className = 'arrow-label';
+        lbl.textContent = 'uncertain → debate';
+        if ((state.debates || []).length) lbl.style.color = 'var(--purple)';
+        fb.appendChild(line);
+        fb.appendChild(lbl);
+        const line2 = document.createElement('div');
+        line2.className = 'arrow-line';
+        fb.appendChild(line2);
+        container.appendChild(fb);
+      } else {
+        const conn = document.createElement('div');
+        conn.className = 'mode-connector';
+        if (i < currentIdx) conn.classList.add('done');
+        container.appendChild(conn);
+      }
+    }
+  });
+}
+
+// ─── Stats ───
+function renderStats(state) {
+  const tasks = state.task_graph?.tasks || [];
+  document.getElementById('statCompleted').textContent = (state.completed_tasks || []).length;
+  document.getElementById('statFailed').textContent = (state.failed_tasks || []).length;
+  document.getElementById('statTotal').textContent = tasks.length;
+  document.getElementById('statSkills').textContent = (state.learned_skills || []).length;
+  document.getElementById('statReflections').textContent = (state.reflections || []).length;
+  document.getElementById('statDebates').textContent = (state.debates || []).length;
+}
+
+// ─── Active Agent ───
+function renderActiveAgent(state) {
+  const body = document.getElementById('activeAgentBody');
+  const badge = document.getElementById('currentModeBadge');
+  const mode = state.current_mode || 'idle';
+  const modeInfo = MODES.find(m => m.key === mode);
+
+  badge.textContent = modeInfo ? `Mode ${modeInfo.num}` : mode;
+
+  const plans = state.plans || [];
+  const currentPlan = plans[plans.length - 1];
+  const currentTask = currentPlan?.task_title || currentPlan?.task_description || '';
+  const execResults = state.execution_results || [];
+  const lastExec = execResults[execResults.length - 1];
+
+  let detail = '';
+  switch (mode) {
+    case 'specification':
+      detail = '<strong>Gathering project specification</strong><br>Analyzing problem statement and asking clarifying questions';
+      break;
+    case 'task_graph':
+      detail = '<strong>Decomposing into task graph</strong><br>Breaking the spec into parallelizable tasks with dependencies';
+      break;
+    case 'planning':
+      detail = `<strong>Planning task execution</strong>${currentTask ? '<br>Task: ' + esc(currentTask) : ''}`;
+      break;
+    case 'controller':
+      detail = '<strong>Quality gate check</strong><br>Evaluating confidence and entropy thresholds';
+      break;
+    case 'execution':
+      detail = `<strong>Executing plan</strong>${currentTask ? '<br>Task: ' + esc(currentTask) : ''}`;
+      break;
+    case 'skill_learning':
+      detail = '<strong>Extracting reusable skills</strong><br>Learning patterns from successful execution';
+      break;
+    case 'reflection':
+      detail = `<strong>Reflecting on failure</strong>${lastExec?.error ? '<br>Error: ' + esc(lastExec.error) : ''}`;
+      break;
+    case 'debate':
+      detail = '<strong>Multi-perspective debate</strong><br>Resolving high-entropy uncertainty in plan';
+      break;
+    default:
+      detail = 'Pipeline idle';
+  }
+
+  body.innerHTML = `
+    <div class="active-agent-info">
+      <div class="agent-mode">${modeInfo ? modeInfo.label : mode}</div>
+      <div class="agent-detail">${detail}</div>
+    </div>`;
+}
+
+// ─── Task Graph ───
+function renderTaskGraph(state) {
+  const body = document.getElementById('taskGraphBody');
+  const badge = document.getElementById('taskCountBadge');
+  const tasks = state.task_graph?.tasks || [];
+  const completed = new Set(state.completed_tasks || []);
+  const failed = new Set(state.failed_tasks || []);
+
+  badge.textContent = `${tasks.length} task${tasks.length !== 1 ? 's' : ''}`;
+
+  if (!tasks.length) {
+    body.innerHTML = '<div class="empty-state">No tasks yet</div>';
+    return;
+  }
+
+  // Group tasks by wave/priority
+  const waves = {};
+  tasks.forEach(t => {
+    const w = t.wave ?? t.priority ?? 0;
+    if (!waves[w]) waves[w] = [];
+    waves[w].push(t);
+  });
+
+  let html = '';
+  Object.keys(waves).sort((a, b) => a - b).forEach(w => {
+    html += `<div class="wave-group">`;
+    html += `<div class="wave-label">Wave ${w}</div>`;
+    waves[w].forEach(t => {
+      let status = 'pending';
+      if (completed.has(t.id)) status = 'completed';
+      else if (failed.has(t.id)) status = 'failed';
+      // Check if this task is currently being worked on
+      else if (state.plans && state.plans.length > completed.size + failed.size) {
+        const latestPlan = state.plans[state.plans.length - 1];
+        if (latestPlan && (latestPlan.task_id === t.id || latestPlan.task_title === t.title)) {
+          status = 'in_progress';
+        }
+      }
+      const deps = (t.depends_on || []).length;
+      html += `<div class="task-item">
+        <div class="task-status ${status}"></div>
+        <span class="task-title">${esc(t.title || t.id)}</span>
+        ${deps ? `<span class="task-deps">${deps} dep${deps > 1 ? 's' : ''}</span>` : ''}
+      </div>`;
+    });
+    html += `</div>`;
+  });
+
+  body.innerHTML = html;
+}
+
+// ─── Results Panel ───
+function renderResults(state) {
+  const body = document.getElementById('resultsBody');
+  const cards = [];
+
+  // Spec summary
+  if (state.spec && Object.keys(state.spec).length) {
+    const spec = state.spec;
+    cards.push(makeCard(
+      `Specification: ${esc(spec.title || 'Untitled')}`,
+      'tag-blue',
+      `<pre>${esc(JSON.stringify(spec, null, 2))}</pre>`
+    ));
+  }
+
+  // Plans
+  (state.plans || []).forEach((p, i) => {
+    const title = p.task_title || p.task_description || `Plan ${i + 1}`;
+    const steps = (p.steps || []).map(s => `• ${s.description || s.action || JSON.stringify(s)}`).join('\n');
+    cards.push(makeCard(
+      `Plan: ${esc(title)}`,
+      'tag-blue',
+      `<div>Confidence: ${p.confidence ?? '—'} | Entropy: ${p.entropy ?? '—'}</div>
+       ${steps ? `<pre>${esc(steps)}</pre>` : ''}`
+    ));
+  });
+
+  // Execution results
+  (state.execution_results || []).forEach((r, i) => {
+    const success = r.success;
+    cards.push(makeCard(
+      `Execution ${i + 1}: ${success ? 'Success' : 'Failed'}`,
+      success ? 'tag-green' : 'tag-red',
+      `<pre>${esc(JSON.stringify(r, null, 2))}</pre>`
+    ));
+  });
+
+  // Reflections
+  (state.reflections || []).forEach((r, i) => {
+    cards.push(makeCard(
+      `Reflection ${i + 1}`,
+      'tag-yellow',
+      `<pre>${esc(JSON.stringify(r, null, 2))}</pre>`
+    ));
+  });
+
+  // Debates
+  (state.debates || []).forEach((d, i) => {
+    cards.push(makeCard(
+      `Debate ${i + 1}`,
+      'tag-purple',
+      `<pre>${esc(JSON.stringify(d, null, 2))}</pre>`
+    ));
+  });
+
+  // Skills
+  (state.learned_skills || []).forEach((s, i) => {
+    cards.push(makeCard(
+      `Skill: ${esc(s.name || `Skill ${i + 1}`)}`,
+      'tag-green',
+      `<div>${esc(s.description || '')}</div>
+       ${s.pattern ? `<pre>${esc(s.pattern)}</pre>` : ''}`
+    ));
+  });
+
+  if (cards.length === 0) {
+    body.innerHTML = '<div class="empty-state">Results will appear as the pipeline runs</div>';
+  } else {
+    body.innerHTML = cards.join('');
+  }
+}
+
+function makeCard(title, tagClass, content) {
+  return `<div class="result-card" onclick="this.classList.toggle('open')">
+    <div class="result-card-header">
+      <span><span class="tag ${tagClass}">${title}</span></span>
+      <span class="result-card-chevron">&#9654;</span>
+    </div>
+    <div class="result-card-body">${content}</div>
+  </div>`;
+}
+
+function esc(s) {
+  if (typeof s !== 'string') s = String(s ?? '');
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+// ─── State Fetching ───
+async function fetchState() {
+  try {
+    const resp = await fetch('/pipeline_state.json?t=' + Date.now());
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const state = await resp.json();
+    lastState = state;
+    setConnected(true);
+    render(state);
+  } catch (e) {
+    setConnected(false);
+    if (!lastState) {
+      // Show empty dashboard
+      render({
+        current_mode: '', spec: {}, task_graph: {},
+        plans: [], execution_results: [], learned_skills: [],
+        reflections: [], debates: [], completed_tasks: [], failed_tasks: [],
+      });
+    }
+  }
+}
+
+function setConnected(ok) {
+  connected = ok;
+  const dot = document.getElementById('statusDot');
+  const label = document.getElementById('statusLabel');
+  if (ok) {
+    dot.className = 'status-dot';
+    label.textContent = 'Live';
+  } else {
+    dot.className = 'status-dot disconnected';
+    label.textContent = 'No data';
+  }
+}
+
+function render(state) {
+  renderPipelineFlow(state);
+  renderStats(state);
+  renderActiveAgent(state);
+  renderTaskGraph(state);
+  renderResults(state);
+}
+
+// Auto-refresh every 2 seconds
+fetchState();
+setInterval(fetchState, 2000);
+</script>
+</body>
+</html>
