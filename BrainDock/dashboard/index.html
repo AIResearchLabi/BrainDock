@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BrainDock — Pipeline Dashboard</title>
+<title>BrainDock — Dashboard</title>
 <style>
   :root {
     --bg: #0f1117;
@@ -19,6 +19,7 @@
     --cyan: #22d3ee;
     --purple: #a78bfa;
     --orange: #fb923c;
+    --pink: #f472b6;
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -28,16 +29,19 @@
     background: var(--bg);
     color: var(--text);
     min-height: 100vh;
+    display: flex;
+    flex-direction: column;
   }
 
   /* ─── Header ─── */
   header {
     background: var(--surface);
     border-bottom: 1px solid var(--border);
-    padding: 16px 24px;
+    padding: 12px 24px;
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-shrink: 0;
   }
 
   header h1 {
@@ -48,7 +52,7 @@
 
   header h1 span { color: var(--accent); }
 
-  .header-controls {
+  .header-right {
     display: flex;
     align-items: center;
     gap: 12px;
@@ -57,178 +61,88 @@
   .status-dot {
     width: 8px; height: 8px;
     border-radius: 50%;
-    background: var(--green);
-    animation: pulse-dot 2s infinite;
+    background: var(--text-dim);
   }
 
-  .status-dot.disconnected { background: var(--red); animation: none; }
+  .status-dot.live { background: var(--green); animation: pulse-dot 2s infinite; }
+  .status-dot.running { background: var(--yellow); animation: pulse-dot 1.5s infinite; }
+  .status-dot.error { background: var(--red); }
 
   .status-label { font-size: 12px; color: var(--text-dim); }
-
-  .btn {
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    color: var(--text);
-    padding: 6px 14px;
-    border-radius: 6px;
-    font-size: 12px;
-    cursor: pointer;
-    transition: background 0.15s;
-  }
-
-  .btn:hover { background: var(--border); }
 
   @keyframes pulse-dot {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.4; }
   }
 
-  /* ─── Stats Bar ─── */
-  .stats-bar {
+  /* ─── Tabs ─── */
+  .tab-bar {
     display: flex;
-    gap: 24px;
-    padding: 12px 24px;
     background: var(--surface);
     border-bottom: 1px solid var(--border);
-    flex-wrap: wrap;
+    flex-shrink: 0;
   }
 
-  .stat {
-    display: flex;
-    align-items: center;
-    gap: 8px;
+  .tab-btn {
+    padding: 10px 24px;
     font-size: 13px;
-  }
-
-  .stat-value {
-    font-weight: 700;
-    font-size: 16px;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .stat-label { color: var(--text-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
-
-  /* ─── Pipeline Flow ─── */
-  .pipeline-section {
-    padding: 20px 24px;
-  }
-
-  .section-title {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    color: var(--text-dim);
-    margin-bottom: 14px;
-    font-weight: 600;
-  }
-
-  .pipeline-flow {
-    display: flex;
-    align-items: center;
-    gap: 0;
-    overflow-x: auto;
-    padding: 10px 0 20px;
-  }
-
-  .mode-node {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-    flex-shrink: 0;
-  }
-
-  .mode-circle {
-    width: 44px; height: 44px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 14px;
-    font-weight: 700;
-    border: 2px solid var(--border);
-    background: var(--surface);
-    color: var(--text-dim);
-    transition: all 0.3s;
-    position: relative;
-  }
-
-  .mode-circle.completed {
-    border-color: var(--green);
-    background: rgba(52, 211, 153, 0.12);
-    color: var(--green);
-  }
-
-  .mode-circle.active {
-    border-color: var(--accent);
-    background: rgba(108, 123, 255, 0.15);
-    color: var(--accent);
-    box-shadow: 0 0 20px rgba(108, 123, 255, 0.3);
-    animation: pulse-ring 2s infinite;
-  }
-
-  @keyframes pulse-ring {
-    0%, 100% { box-shadow: 0 0 10px rgba(108, 123, 255, 0.2); }
-    50% { box-shadow: 0 0 25px rgba(108, 123, 255, 0.45); }
-  }
-
-  .mode-label {
-    font-size: 10px;
-    color: var(--text-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-    white-space: nowrap;
     font-weight: 500;
-  }
-
-  .mode-circle.active + .mode-label,
-  .mode-node .mode-circle.active ~ .mode-label { color: var(--accent); }
-
-  .mode-connector {
-    width: 32px;
-    height: 2px;
-    background: var(--border);
-    flex-shrink: 0;
-    position: relative;
-    top: -10px;
-  }
-
-  .mode-connector.done { background: var(--green); }
-
-  .feedback-arrow {
-    display: flex;
-    align-items: center;
-    gap: 0;
-    flex-shrink: 0;
-    position: relative;
-    top: -10px;
-  }
-
-  .feedback-arrow .arrow-line {
-    width: 20px; height: 2px;
-    background: var(--border);
-  }
-
-  .feedback-arrow .arrow-label {
-    font-size: 8px;
     color: var(--text-dim);
-    padding: 2px 5px;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s;
+    position: relative;
+  }
+
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .tab-badge {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--red);
+    display: none;
+  }
+
+  .tab-badge.visible { display: block; }
+
+  .tab-content {
+    display: none;
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  .tab-content.active { display: flex; flex-direction: column; }
+
+  /* ─── Shared ─── */
+  .btn {
+    background: var(--accent);
+    border: none;
+    color: #fff;
+    padding: 8px 18px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+
+  .btn:hover { opacity: 0.85; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .btn-secondary {
+    background: var(--surface2);
     border: 1px solid var(--border);
-    border-radius: 3px;
-    white-space: nowrap;
+    color: var(--text);
   }
 
-  /* ─── Main Grid ─── */
-  .main-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-    padding: 0 24px 24px;
-  }
-
-  @media (max-width: 900px) {
-    .main-grid { grid-template-columns: 1fr; }
-  }
+  .btn-secondary:hover { background: var(--border); }
 
   .panel {
     background: var(--surface);
@@ -245,10 +159,7 @@
     justify-content: space-between;
   }
 
-  .panel-title {
-    font-size: 13px;
-    font-weight: 600;
-  }
+  .panel-title { font-size: 13px; font-weight: 600; }
 
   .panel-badge {
     font-size: 10px;
@@ -267,65 +178,6 @@
   .panel-body::-webkit-scrollbar { width: 4px; }
   .panel-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
-  /* ─── Task Graph Panel ─── */
-  .wave-group { margin-bottom: 14px; }
-
-  .wave-label {
-    font-size: 10px;
-    text-transform: uppercase;
-    color: var(--text-dim);
-    margin-bottom: 6px;
-    font-weight: 600;
-    letter-spacing: 0.5px;
-  }
-
-  .task-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 10px;
-    border-radius: 6px;
-    font-size: 12px;
-    margin-bottom: 3px;
-    background: var(--surface2);
-  }
-
-  .task-status {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-
-  .task-status.pending { background: var(--text-dim); }
-  .task-status.in_progress { background: var(--yellow); animation: pulse-dot 1.5s infinite; }
-  .task-status.completed { background: var(--green); }
-  .task-status.failed { background: var(--red); }
-
-  .task-title { flex: 1; color: var(--text); }
-  .task-deps { font-size: 10px; color: var(--text-dim); }
-
-  /* ─── Active Agent Panel ─── */
-  .active-agent-info {
-    text-align: center;
-    padding: 20px;
-  }
-
-  .agent-mode {
-    font-size: 24px;
-    font-weight: 700;
-    color: var(--accent);
-    text-transform: capitalize;
-    margin-bottom: 8px;
-  }
-
-  .agent-detail {
-    font-size: 13px;
-    color: var(--text-dim);
-    line-height: 1.6;
-  }
-
-  .agent-detail strong { color: var(--text); }
-
   .empty-state {
     text-align: center;
     padding: 30px;
@@ -333,154 +185,763 @@
     font-size: 13px;
   }
 
-  /* ─── Results Panel ─── */
-  .result-card {
-    background: var(--surface2);
-    border-radius: 8px;
-    margin-bottom: 8px;
-    overflow: hidden;
+  .section-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    margin-bottom: 14px;
+    font-weight: 600;
   }
 
-  .result-card-header {
+  /* ─── Tab 1: Project ─── */
+  #tab-project { padding: 24px; gap: 20px; }
+
+  .start-form {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+  }
+
+  .start-form h2 {
+    font-size: 16px;
+    margin-bottom: 16px;
+    font-weight: 600;
+  }
+
+  .form-group {
+    margin-bottom: 14px;
+  }
+
+  .form-group label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .form-group input, .form-group textarea {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
     padding: 10px 14px;
-    cursor: pointer;
+    border-radius: 6px;
+    font-size: 14px;
+    font-family: inherit;
+    resize: vertical;
+  }
+
+  .form-group input:focus, .form-group textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  .runs-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .run-item {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    background: var(--surface2);
+    padding: 10px 14px;
+    border-radius: 6px;
     font-size: 13px;
-    font-weight: 500;
-    user-select: none;
   }
 
-  .result-card-header:hover { background: rgba(255,255,255,0.03); }
+  .run-item-info { flex: 1; }
+  .run-item-title { font-weight: 600; }
+  .run-item-meta { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+  .run-item-actions { display: flex; gap: 6px; }
 
-  .result-card-chevron {
-    font-size: 10px;
-    color: var(--text-dim);
-    transition: transform 0.2s;
+  /* Stats Bar */
+  .stats-bar {
+    display: flex;
+    gap: 24px;
+    padding: 12px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    flex-wrap: wrap;
   }
 
-  .result-card.open .result-card-chevron { transform: rotate(90deg); }
+  .stat { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .stat-value { font-weight: 700; font-size: 16px; font-variant-numeric: tabular-nums; }
+  .stat-label { color: var(--text-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
 
-  .result-card-body {
-    display: none;
-    padding: 0 14px 12px;
-    font-size: 12px;
-    color: var(--text-dim);
-    line-height: 1.6;
-  }
-
-  .result-card.open .result-card-body { display: block; }
-
-  .result-card-body pre {
-    background: var(--bg);
-    padding: 8px 10px;
-    border-radius: 4px;
+  /* Pipeline Flow */
+  .pipeline-flow {
+    display: flex;
+    align-items: center;
+    gap: 0;
     overflow-x: auto;
-    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
-    font-size: 11px;
-    white-space: pre-wrap;
-    word-break: break-word;
-    margin-top: 6px;
-    max-height: 200px;
-    overflow-y: auto;
+    padding: 10px 0 20px;
   }
 
-  .tag {
-    display: inline-block;
-    padding: 2px 6px;
-    border-radius: 3px;
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
+  .mode-node { display: flex; flex-direction: column; align-items: center; gap: 6px; flex-shrink: 0; }
+
+  .mode-circle {
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    border: 2px solid var(--border);
+    background: var(--surface);
+    color: var(--text-dim);
+    transition: all 0.3s;
   }
 
+  .mode-circle.completed { border-color: var(--green); background: rgba(52, 211, 153, 0.12); color: var(--green); }
+  .mode-circle.active { border-color: var(--accent); background: rgba(108, 123, 255, 0.15); color: var(--accent); box-shadow: 0 0 20px rgba(108, 123, 255, 0.3); animation: pulse-ring 2s infinite; }
+
+  @keyframes pulse-ring {
+    0%, 100% { box-shadow: 0 0 10px rgba(108, 123, 255, 0.2); }
+    50% { box-shadow: 0 0 25px rgba(108, 123, 255, 0.45); }
+  }
+
+  .mode-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.3px; white-space: nowrap; font-weight: 500; }
+  .mode-node .mode-circle.active ~ .mode-label { color: var(--accent); }
+  .mode-connector { width: 32px; height: 2px; background: var(--border); flex-shrink: 0; position: relative; top: -10px; }
+  .mode-connector.done { background: var(--green); }
+
+  .feedback-arrow { display: flex; align-items: center; gap: 0; flex-shrink: 0; position: relative; top: -10px; }
+  .feedback-arrow .arrow-line { width: 20px; height: 2px; background: var(--border); }
+  .feedback-arrow .arrow-label { font-size: 8px; color: var(--text-dim); padding: 2px 5px; border: 1px solid var(--border); border-radius: 3px; white-space: nowrap; }
+
+  /* Question Card */
+  .question-card {
+    background: var(--surface);
+    border: 2px solid var(--yellow);
+    border-radius: 10px;
+    padding: 20px;
+  }
+
+  .question-card h3 {
+    font-size: 14px;
+    color: var(--yellow);
+    margin-bottom: 12px;
+  }
+
+  .question-item { margin-bottom: 16px; }
+  .question-item .q-text { font-size: 14px; font-weight: 500; margin-bottom: 4px; }
+  .question-item .q-why { font-size: 12px; color: var(--text-dim); margin-bottom: 8px; }
+
+  .question-item .q-options { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+
+  .q-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: var(--surface2);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    border: 1px solid transparent;
+    transition: border-color 0.15s;
+  }
+
+  .q-option:hover { border-color: var(--accent); }
+  .q-option.selected { border-color: var(--accent); background: rgba(108, 123, 255, 0.1); }
+
+  .q-option input[type="radio"] { accent-color: var(--accent); }
+
+  .q-custom-input {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-family: inherit;
+  }
+
+  .q-custom-input:focus { outline: none; border-color: var(--accent); }
+
+  /* Main Grid */
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  @media (max-width: 900px) { .main-grid { grid-template-columns: 1fr; } }
+
+  .full-width { grid-column: 1 / -1; }
+
+  /* Task Graph */
+  .wave-group { margin-bottom: 14px; }
+  .wave-label { font-size: 10px; text-transform: uppercase; color: var(--text-dim); margin-bottom: 6px; font-weight: 600; letter-spacing: 0.5px; }
+
+  .task-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 6px; font-size: 12px; margin-bottom: 3px; background: var(--surface2); }
+  .task-status { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .task-status.pending { background: var(--text-dim); }
+  .task-status.in_progress { background: var(--yellow); animation: pulse-dot 1.5s infinite; }
+  .task-status.completed { background: var(--green); }
+  .task-status.failed { background: var(--red); }
+  .task-title { flex: 1; color: var(--text); }
+  .task-deps { font-size: 10px; color: var(--text-dim); }
+
+  /* Active Agent */
+  .active-agent-info { text-align: center; padding: 20px; }
+  .agent-mode { font-size: 24px; font-weight: 700; color: var(--accent); text-transform: capitalize; margin-bottom: 8px; }
+  .agent-detail { font-size: 13px; color: var(--text-dim); line-height: 1.6; }
+  .agent-detail strong { color: var(--text); }
+
+  /* Result Cards */
+  .result-card { background: var(--surface2); border-radius: 8px; margin-bottom: 8px; overflow: hidden; }
+  .result-card-header { padding: 10px 14px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; font-size: 13px; font-weight: 500; user-select: none; }
+  .result-card-header:hover { background: rgba(255,255,255,0.03); }
+  .result-card-chevron { font-size: 10px; color: var(--text-dim); transition: transform 0.2s; }
+  .result-card.open .result-card-chevron { transform: rotate(90deg); }
+  .result-card-body { display: none; padding: 0 14px 12px; font-size: 12px; color: var(--text-dim); line-height: 1.6; }
+  .result-card.open .result-card-body { display: block; }
+  .result-card-body pre { background: var(--bg); padding: 8px 10px; border-radius: 4px; overflow-x: auto; font-family: 'SF Mono', 'Cascadia Code', monospace; font-size: 11px; white-space: pre-wrap; word-break: break-word; margin-top: 6px; max-height: 200px; overflow-y: auto; }
+
+  .tag { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; text-transform: uppercase; }
   .tag-green { background: rgba(52,211,153,0.15); color: var(--green); }
   .tag-red { background: rgba(248,113,113,0.15); color: var(--red); }
   .tag-yellow { background: rgba(251,191,36,0.15); color: var(--yellow); }
   .tag-blue { background: rgba(108,123,255,0.15); color: var(--accent); }
   .tag-purple { background: rgba(167,139,250,0.15); color: var(--purple); }
 
-  /* ─── Full-width panel ─── */
-  .full-width { grid-column: 1 / -1; }
+  /* ─── Tab 2: Agents ─── */
+  #tab-agents {
+    padding: 0;
+  }
+
+  .activity-feed {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 24px;
+  }
+
+  .activity-entry {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+
+  .activity-entry:last-child { border-bottom: none; }
+
+  .activity-ts {
+    font-size: 11px;
+    color: var(--text-dim);
+    flex-shrink: 0;
+    width: 60px;
+    font-family: monospace;
+  }
+
+  .activity-agent {
+    flex-shrink: 0;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    min-width: 80px;
+    text-align: center;
+  }
+
+  .activity-action {
+    color: var(--text);
+    font-weight: 500;
+    flex-shrink: 0;
+    min-width: 100px;
+  }
+
+  .activity-detail {
+    color: var(--text-dim);
+    flex: 1;
+  }
+
+  .activity-status-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    margin-top: 6px;
+  }
+
+  /* Agent colors */
+  .agent-spec { background: rgba(108,123,255,0.2); color: var(--accent); }
+  .agent-task_graph { background: rgba(34,211,238,0.2); color: var(--cyan); }
+  .agent-planner { background: rgba(167,139,250,0.2); color: var(--purple); }
+  .agent-controller { background: rgba(251,191,36,0.2); color: var(--yellow); }
+  .agent-executor { background: rgba(52,211,153,0.2); color: var(--green); }
+  .agent-reflection { background: rgba(251,146,60,0.2); color: var(--orange); }
+  .agent-debate { background: rgba(244,114,182,0.2); color: var(--pink); }
+  .agent-orchestrator { background: rgba(139,143,163,0.2); color: var(--text-dim); }
+  .agent-skill_learning { background: rgba(34,211,238,0.2); color: var(--cyan); }
+  .agent-market_study { background: rgba(251,191,36,0.2); color: var(--yellow); }
+
+  /* ─── Agent Groups (collapsible) ─── */
+  details.agent-group {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    background: var(--surface);
+    overflow: hidden;
+  }
+
+  details.agent-group summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    cursor: pointer;
+    font-size: 13px;
+    user-select: none;
+    list-style: none;
+  }
+
+  details.agent-group summary::-webkit-details-marker { display: none; }
+  details.agent-group summary::marker { display: none; content: ""; }
+
+  details.agent-group summary .group-chevron {
+    font-size: 10px;
+    color: var(--text-dim);
+    transition: transform 0.2s;
+    flex-shrink: 0;
+  }
+
+  details.agent-group[open] summary .group-chevron {
+    transform: rotate(90deg);
+  }
+
+  details.agent-group summary .group-count {
+    font-size: 10px;
+    color: var(--text-dim);
+    background: var(--surface2);
+    padding: 2px 6px;
+    border-radius: 8px;
+  }
+
+  details.agent-group summary .group-latest {
+    flex: 1;
+    font-size: 12px;
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  details.agent-group .agent-group-body {
+    border-top: 1px solid var(--border);
+    padding: 4px 14px;
+    max-height: 400px;
+    overflow-y: auto;
+  }
+
+  /* ─── Error Banner ─── */
+  .error-banner {
+    background: rgba(248,113,113,0.15);
+    border: 1px solid var(--red);
+    color: var(--red);
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .error-banner .error-icon { font-size: 16px; }
+
+  /* ─── Tab 4: Logs ─── */
+  #tab-logs { padding: 0; }
+
+  .logs-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .logs-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 24px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+
+  .logs-header .logs-stat {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .logs-header .logs-stat strong {
+    color: var(--text);
+    font-size: 14px;
+  }
+
+  .logs-feed {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 24px;
+  }
+
+  .log-entry {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    overflow: hidden;
+  }
+
+  .log-entry-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    cursor: pointer;
+    font-size: 13px;
+    user-select: none;
+  }
+
+  .log-entry-header:hover { background: rgba(255,255,255,0.02); }
+
+  .log-entry .log-chevron {
+    font-size: 10px;
+    color: var(--text-dim);
+    transition: transform 0.2s;
+    flex-shrink: 0;
+  }
+
+  .log-entry.open .log-chevron { transform: rotate(90deg); }
+
+  .log-entry-header .log-ts {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-family: monospace;
+    flex-shrink: 0;
+    width: 60px;
+  }
+
+  .log-entry-header .log-duration {
+    font-size: 11px;
+    color: var(--cyan);
+    font-family: monospace;
+    flex-shrink: 0;
+    width: 60px;
+    text-align: right;
+  }
+
+  .log-entry-header .log-tokens {
+    font-size: 10px;
+    color: var(--text-dim);
+    flex-shrink: 0;
+    width: 100px;
+    text-align: right;
+    font-family: monospace;
+  }
+
+  .log-entry-header .log-preview {
+    flex: 1;
+    color: var(--text-dim);
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .log-entry-body {
+    display: none;
+    border-top: 1px solid var(--border);
+    padding: 12px 14px;
+  }
+
+  .log-entry.open .log-entry-body { display: block; }
+
+  .log-section-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-dim);
+    margin-top: 10px;
+    margin-bottom: 4px;
+    font-weight: 600;
+  }
+
+  .log-section-label:first-child { margin-top: 0; }
+
+  .log-content {
+    background: var(--bg);
+    padding: 8px 10px;
+    border-radius: 4px;
+    font-family: 'SF Mono', 'Cascadia Code', monospace;
+    font-size: 11px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 300px;
+    overflow-y: auto;
+    color: var(--text-dim);
+    line-height: 1.5;
+  }
+
+  /* ─── Tab 3: Chat ─── */
+  #tab-chat {
+    padding: 0;
+  }
+
+  .chat-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .chat-msg {
+    max-width: 70%;
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 13px;
+    line-height: 1.5;
+    word-break: break-word;
+  }
+
+  .chat-msg.system {
+    align-self: flex-start;
+    background: var(--surface2);
+    color: var(--text-dim);
+  }
+
+  .chat-msg.user {
+    align-self: flex-end;
+    background: var(--accent);
+    color: #fff;
+  }
+
+  .chat-msg.question {
+    align-self: flex-start;
+    background: var(--surface);
+    border: 1px solid var(--yellow);
+    max-width: 85%;
+    padding: 16px;
+  }
+
+  .chat-msg .chat-ts {
+    font-size: 10px;
+    opacity: 0.6;
+    margin-top: 4px;
+  }
+
+  .chat-input-bar {
+    display: flex;
+    gap: 8px;
+    padding: 12px 24px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .chat-input-bar input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-family: inherit;
+  }
+
+  .chat-input-bar input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
 </style>
 </head>
 <body>
 
 <header>
-  <h1><span>Brain</span>Dock <span style="font-weight:300;color:var(--text-dim);font-size:14px;">Pipeline Dashboard</span></h1>
-  <div class="header-controls">
+  <h1><span>Brain</span>Dock</h1>
+  <div class="header-right">
     <div class="status-dot" id="statusDot"></div>
     <span class="status-label" id="statusLabel">Connecting...</span>
-    <button class="btn" onclick="fetchState()">Refresh</button>
   </div>
 </header>
 
-<!-- Stats Bar -->
-<div class="stats-bar" id="statsBar">
-  <div class="stat">
-    <span class="stat-value" id="statCompleted" style="color:var(--green)">0</span>
-    <span class="stat-label">Completed</span>
+<div class="tab-bar">
+  <button class="tab-btn active" onclick="switchTab('project')" id="tabBtnProject">
+    Project
+  </button>
+  <button class="tab-btn" onclick="switchTab('agents')" id="tabBtnAgents">
+    Agents
+    <span class="tab-badge" id="agentsBadge"></span>
+  </button>
+  <button class="tab-btn" onclick="switchTab('chat')" id="tabBtnChat">
+    Chat
+    <span class="tab-badge" id="chatBadge"></span>
+  </button>
+  <button class="tab-btn" onclick="switchTab('logs')" id="tabBtnLogs">
+    Logs
+    <span class="tab-badge" id="logsBadge"></span>
+  </button>
+</div>
+
+<!-- Tab 1: Project -->
+<div class="tab-content active" id="tab-project">
+  <!-- Start form (shown when idle) -->
+  <div id="startFormSection" class="start-form">
+    <h2>New Project</h2>
+    <div class="form-group">
+      <label>Title (optional)</label>
+      <input type="text" id="inputTitle" placeholder="my-project">
+    </div>
+    <div class="form-group">
+      <label>Problem Statement</label>
+      <textarea id="inputProblem" rows="3" placeholder="Describe what you want to build..."></textarea>
+    </div>
+    <button class="btn" id="startBtn" onclick="startPipeline()">Start Pipeline</button>
   </div>
-  <div class="stat">
-    <span class="stat-value" id="statFailed" style="color:var(--red)">0</span>
-    <span class="stat-label">Failed</span>
+
+  <!-- Previous runs -->
+  <div id="runsSection" class="panel" style="display:none">
+    <div class="panel-header">
+      <span class="panel-title">Previous Runs</span>
+      <span class="panel-badge" id="runsCount">0</span>
+    </div>
+    <div class="panel-body runs-list" id="runsList"></div>
   </div>
-  <div class="stat">
-    <span class="stat-value" id="statTotal">0</span>
-    <span class="stat-label">Total Tasks</span>
+
+  <!-- Error banner -->
+  <div id="errorBanner" class="error-banner" style="display:none">
+    <span class="error-icon">!</span>
+    <span id="errorBannerText"></span>
   </div>
-  <div class="stat">
-    <span class="stat-value" id="statSkills" style="color:var(--cyan)">0</span>
-    <span class="stat-label">Skills Learned</span>
+
+  <!-- Question card (shown when questions pending) -->
+  <div id="questionSection" style="display:none"></div>
+
+  <!-- Pipeline flow -->
+  <div id="pipelineSection" style="display:none">
+    <div class="section-title">Pipeline Flow</div>
+    <div class="pipeline-flow" id="pipelineFlow"></div>
   </div>
-  <div class="stat">
-    <span class="stat-value" id="statReflections" style="color:var(--yellow)">0</span>
-    <span class="stat-label">Reflections</span>
+
+  <!-- Stats bar -->
+  <div class="stats-bar" id="statsBar" style="display:none">
+    <div class="stat">
+      <span class="stat-value" id="statCompleted" style="color:var(--green)">0</span>
+      <span class="stat-label">Completed</span>
+    </div>
+    <div class="stat">
+      <span class="stat-value" id="statFailed" style="color:var(--red)">0</span>
+      <span class="stat-label">Failed</span>
+    </div>
+    <div class="stat">
+      <span class="stat-value" id="statTotal">0</span>
+      <span class="stat-label">Tasks</span>
+    </div>
+    <div class="stat">
+      <span class="stat-value" id="statSkills" style="color:var(--cyan)">0</span>
+      <span class="stat-label">Skills</span>
+    </div>
+    <div class="stat">
+      <span class="stat-value" id="statReflections" style="color:var(--yellow)">0</span>
+      <span class="stat-label">Reflections</span>
+    </div>
+    <div class="stat">
+      <span class="stat-value" id="statDebates" style="color:var(--purple)">0</span>
+      <span class="stat-label">Debates</span>
+    </div>
+    <div class="stat">
+      <span class="stat-value" id="statMarketStudies" style="color:var(--yellow)">0</span>
+      <span class="stat-label">Market Studies</span>
+    </div>
   </div>
-  <div class="stat">
-    <span class="stat-value" id="statDebates" style="color:var(--purple)">0</span>
-    <span class="stat-label">Debates</span>
+
+  <!-- Main grid: active agent + task graph + results -->
+  <div class="main-grid" id="mainGrid" style="display:none">
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Active Agent</span>
+        <span class="panel-badge" id="currentModeBadge">—</span>
+      </div>
+      <div class="panel-body" id="activeAgentBody">
+        <div class="empty-state">Waiting for pipeline to start...</div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Task Graph</span>
+        <span class="panel-badge" id="taskCountBadge">0 tasks</span>
+      </div>
+      <div class="panel-body" id="taskGraphBody">
+        <div class="empty-state">No tasks yet</div>
+      </div>
+    </div>
+    <div class="panel full-width">
+      <div class="panel-header">
+        <span class="panel-title">Results</span>
+      </div>
+      <div class="panel-body" id="resultsBody">
+        <div class="empty-state">Results will appear as the pipeline runs</div>
+      </div>
+    </div>
   </div>
 </div>
 
-<!-- Pipeline Flow -->
-<div class="pipeline-section">
-  <div class="section-title">Pipeline Flow</div>
-  <div class="pipeline-flow" id="pipelineFlow"></div>
+<!-- Tab 2: Agents -->
+<div class="tab-content" id="tab-agents">
+  <div class="activity-feed" id="activityFeed">
+    <div class="empty-state" id="activityEmpty">No activity yet. Start a pipeline to see agent events.</div>
+  </div>
 </div>
 
-<!-- Main Grid -->
-<div class="main-grid">
-  <!-- Active Agent Panel -->
-  <div class="panel">
-    <div class="panel-header">
-      <span class="panel-title">Active Agent</span>
-      <span class="panel-badge" id="currentModeBadge">—</span>
+<!-- Tab 3: Chat -->
+<div class="tab-content" id="tab-chat">
+  <div class="chat-container">
+    <div class="chat-messages" id="chatMessages">
+      <div class="empty-state" id="chatEmpty">Chat messages will appear here during pipeline execution.</div>
     </div>
-    <div class="panel-body" id="activeAgentBody">
-      <div class="empty-state">Waiting for pipeline to start...</div>
-    </div>
-  </div>
-
-  <!-- Task Graph Panel -->
-  <div class="panel">
-    <div class="panel-header">
-      <span class="panel-title">Task Graph</span>
-      <span class="panel-badge" id="taskCountBadge">0 tasks</span>
-    </div>
-    <div class="panel-body" id="taskGraphBody">
-      <div class="empty-state">No tasks yet</div>
+    <div class="chat-input-bar">
+      <input type="text" id="chatInput" placeholder="Type a message..." onkeydown="if(event.key==='Enter')sendChat()">
+      <button class="btn" onclick="sendChat()">Send</button>
     </div>
   </div>
+</div>
 
-  <!-- Results Panel -->
-  <div class="panel full-width">
-    <div class="panel-header">
-      <span class="panel-title">Results</span>
+<!-- Tab 4: Logs -->
+<div class="tab-content" id="tab-logs">
+  <div class="logs-container">
+    <div class="logs-header">
+      <span class="logs-stat">Calls: <strong id="logsTotalCalls">0</strong></span>
+      <span class="logs-stat">Est. Input: <strong id="logsTotalInput">0</strong></span>
+      <span class="logs-stat">Est. Output: <strong id="logsTotalOutput">0</strong></span>
+      <span class="logs-stat">Total Time: <strong id="logsTotalTime">0s</strong></span>
     </div>
-    <div class="panel-body" id="resultsBody">
-      <div class="empty-state">Results will appear as the pipeline runs</div>
+    <div class="logs-feed" id="logsFeed">
+      <div class="empty-state" id="logsEmpty">No LLM calls yet. Start a pipeline to see Claude outputs.</div>
     </div>
   </div>
 </div>
@@ -500,16 +961,237 @@ const MODES = [
 const MODE_ORDER = {};
 MODES.forEach((m, i) => MODE_ORDER[m.key] = i);
 
-let lastState = null;
-let connected = false;
+const AGENT_COLORS = {
+  spec: 'agent-spec', task_graph: 'agent-task_graph', planner: 'agent-planner',
+  controller: 'agent-controller', executor: 'agent-executor', reflection: 'agent-reflection',
+  debate: 'agent-debate', orchestrator: 'agent-orchestrator', skill_learning: 'agent-skill_learning',
+  market_study: 'agent-market_study',
+};
 
-// ─── Pipeline Flow Rendering ───
+const STATUS_COLORS = { info: 'var(--text-dim)', success: 'var(--green)', error: 'var(--red)', warning: 'var(--yellow)' };
+
+// Base path for API requests — works behind reverse proxies with path prefixes
+const BASE_PATH = window.location.pathname.replace(/\/[^/]*$/, '/');
+function apiUrl(path) { return BASE_PATH + path.replace(/^\//, ''); }
+
+let currentTab = 'project';
+let activityCursor = 0;
+let chatCursor = 0;
+let logsCursor = 0;
+let lastState = null;
+let runsLoaded = false;
+let logsTotals = { calls: 0, input: 0, output: 0, time: 0 };
+
+// ─── Tab Switching ───
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  document.getElementById('tabBtn' + tab.charAt(0).toUpperCase() + tab.slice(1)).classList.add('active');
+  document.getElementById('tab-' + tab).classList.add('active');
+  // Clear badge
+  if (tab === 'agents') document.getElementById('agentsBadge').classList.remove('visible');
+  if (tab === 'chat') document.getElementById('chatBadge').classList.remove('visible');
+  if (tab === 'logs') document.getElementById('logsBadge').classList.remove('visible');
+  // Auto-scroll
+  if (tab === 'agents') scrollActivity();
+  if (tab === 'chat') scrollChat();
+  if (tab === 'logs') scrollLogs();
+}
+
+// ─── Helpers ───
+function esc(s) {
+  if (typeof s !== 'string') s = String(s ?? '');
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+async function fetchJson(url) {
+  const r = await fetch(url);
+  const ct = r.headers.get('content-type') || '';
+  if (!ct.includes('application/json')) {
+    throw new Error('Expected JSON but got ' + ct + ' (HTTP ' + r.status + ')');
+  }
+  if (!r.ok) {
+    const data = await r.json().catch(() => ({}));
+    throw new Error(data.error || 'HTTP ' + r.status);
+  }
+  return r.json();
+}
+
+function fmtTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts * 1000);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+// ─── Start Pipeline ───
+async function startPipeline() {
+  const title = document.getElementById('inputTitle').value.trim();
+  const problem = document.getElementById('inputProblem').value.trim();
+  if (!problem) { alert('Please enter a problem statement.'); return; }
+  const btn = document.getElementById('startBtn');
+  btn.disabled = true;
+  btn.textContent = 'Starting...';
+  try {
+    const r = await fetch(apiUrl('api/start'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, problem }),
+    });
+    const ct = r.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) {
+      throw new Error('Server returned non-JSON response (HTTP ' + r.status + '). Check that BrainDock dashboard is running on this port.');
+    }
+    const data = await r.json();
+    if (data.error) { alert(data.error); btn.disabled = false; btn.textContent = 'Start Pipeline'; return; }
+  } catch (e) { alert('Failed: ' + e.message); }
+  btn.disabled = false;
+  btn.textContent = 'Start Pipeline';
+}
+
+// ─── Resume Run ───
+async function resumeRun(title) {
+  try {
+    const r = await fetch(apiUrl('api/resume'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    });
+    const ct = r.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) {
+      throw new Error('Server returned non-JSON response. Check that BrainDock dashboard is running on this port.');
+    }
+    const data = await r.json();
+    if (data.error) alert(data.error);
+  } catch (e) { alert('Failed: ' + e.message); }
+}
+
+// ─── Submit Answers ───
+async function submitAnswers() {
+  const inputs = document.querySelectorAll('[data-qid]');
+  const answers = {};
+  inputs.forEach(el => {
+    const qid = el.dataset.qid;
+    if (el.type === 'radio') {
+      if (el.checked) answers[qid] = el.value;
+    } else if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+      if (el.value.trim()) answers[qid] = el.value.trim();
+    }
+  });
+  // Also check custom inputs
+  document.querySelectorAll('[data-qid-custom]').forEach(el => {
+    const qid = el.dataset.qidCustom;
+    if (el.value.trim() && !answers[qid]) answers[qid] = el.value.trim();
+  });
+  try {
+    await fetch(apiUrl('api/answers'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ answers }),
+    });
+  } catch (e) { alert('Failed to submit: ' + e.message); }
+}
+
+// ─── Send Chat ───
+async function sendChat() {
+  const input = document.getElementById('chatInput');
+  const msg = input.value.trim();
+  if (!msg) return;
+  input.value = '';
+  try {
+    await fetch(apiUrl('api/chat'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg }),
+    });
+  } catch (e) { /* ignore */ }
+}
+
+// ─── Load Runs ───
+async function loadRuns() {
+  try {
+    const data = await fetchJson(apiUrl('api/runs'));
+    const runs = data.runs || [];
+    const section = document.getElementById('runsSection');
+    const list = document.getElementById('runsList');
+    const count = document.getElementById('runsCount');
+    if (runs.length > 0) {
+      section.style.display = '';
+      count.textContent = runs.length;
+      list.innerHTML = runs.map(r => `
+        <div class="run-item">
+          <div class="run-item-info">
+            <div class="run-item-title">${esc(r.title)}</div>
+            <div class="run-item-meta">${r.completed}/${r.total} tasks | Mode: ${esc(r.mode)}</div>
+          </div>
+          <div class="run-item-actions">
+            <button class="btn btn-secondary" onclick="resumeRun('${esc(r.title).replace(/'/g, "\\'")}')">Resume</button>
+          </div>
+        </div>
+      `).join('');
+    } else {
+      section.style.display = 'none';
+    }
+    runsLoaded = true;
+  } catch (e) { /* ignore */ }
+}
+
+// ─── Rendering: Project Tab ───
+function renderProjectTab(state) {
+  const running = state._running;
+  const hasState = !!(state.title || state.spec);
+
+  // Show/hide form
+  document.getElementById('startFormSection').style.display = running ? 'none' : '';
+
+  // Error banner
+  const errorBanner = document.getElementById('errorBanner');
+  if (state._error) {
+    errorBanner.style.display = '';
+    document.getElementById('errorBannerText').textContent = state._error;
+  } else {
+    errorBanner.style.display = 'none';
+  }
+
+  // Pipeline flow
+  const pipeSection = document.getElementById('pipelineSection');
+  if (hasState || running) {
+    pipeSection.style.display = '';
+    renderPipelineFlow(state);
+  } else {
+    pipeSection.style.display = 'none';
+  }
+
+  // Stats
+  const statsBar = document.getElementById('statsBar');
+  if (hasState || running) {
+    statsBar.style.display = '';
+    renderStats(state);
+  } else {
+    statsBar.style.display = 'none';
+  }
+
+  // Main grid
+  const grid = document.getElementById('mainGrid');
+  if (hasState || running) {
+    grid.style.display = '';
+    renderActiveAgent(state);
+    renderTaskGraph(state);
+    renderResults(state);
+  } else {
+    grid.style.display = 'none';
+  }
+
+  // Questions
+  renderQuestions(state);
+}
+
 function renderPipelineFlow(state) {
   const container = document.getElementById('pipelineFlow');
   container.innerHTML = '';
-
   const currentIdx = MODE_ORDER[state.current_mode] ?? -1;
-  // Track which modes have been visited
   const visited = new Set();
   if (state.spec && Object.keys(state.spec).length) visited.add('specification');
   if (state.task_graph && (state.task_graph.tasks || []).length) visited.add('task_graph');
@@ -520,63 +1202,39 @@ function renderPipelineFlow(state) {
   if ((state.debates || []).length) visited.add('debate');
 
   MODES.forEach((mode, i) => {
-    // Node
     const node = document.createElement('div');
     node.className = 'mode-node';
-
     const circle = document.createElement('div');
     circle.className = 'mode-circle';
-    if (mode.key === state.current_mode) {
-      circle.classList.add('active');
-    } else if (visited.has(mode.key) || i < currentIdx) {
-      circle.classList.add('completed');
-    }
+    if (mode.key === state.current_mode) circle.classList.add('active');
+    else if (visited.has(mode.key) || i < currentIdx) circle.classList.add('completed');
     circle.textContent = mode.num;
-
     const label = document.createElement('div');
     label.className = 'mode-label';
     label.textContent = mode.label;
-
     node.appendChild(circle);
     node.appendChild(label);
     container.appendChild(node);
 
-    // Connector (except after last or special feedback)
     if (i < MODES.length - 1) {
-      // Add feedback arrows for reflection/debate paths
       if (mode.key === 'execution') {
-        const fb = document.createElement('div');
-        fb.className = 'feedback-arrow';
-        const line = document.createElement('div');
-        line.className = 'arrow-line';
-        const lbl = document.createElement('div');
-        lbl.className = 'arrow-label';
-        lbl.textContent = 'fail → reflect';
+        const fb = document.createElement('div'); fb.className = 'feedback-arrow';
+        const l1 = document.createElement('div'); l1.className = 'arrow-line';
+        const lbl = document.createElement('div'); lbl.className = 'arrow-label'; lbl.textContent = 'fail \u2192 reflect';
         if ((state.reflections || []).length) lbl.style.color = 'var(--yellow)';
-        fb.appendChild(line);
-        fb.appendChild(lbl);
-        const line2 = document.createElement('div');
-        line2.className = 'arrow-line';
-        fb.appendChild(line2);
+        const l2 = document.createElement('div'); l2.className = 'arrow-line';
+        fb.appendChild(l1); fb.appendChild(lbl); fb.appendChild(l2);
         container.appendChild(fb);
       } else if (mode.key === 'controller') {
-        const fb = document.createElement('div');
-        fb.className = 'feedback-arrow';
-        const line = document.createElement('div');
-        line.className = 'arrow-line';
-        const lbl = document.createElement('div');
-        lbl.className = 'arrow-label';
-        lbl.textContent = 'uncertain → debate';
+        const fb = document.createElement('div'); fb.className = 'feedback-arrow';
+        const l1 = document.createElement('div'); l1.className = 'arrow-line';
+        const lbl = document.createElement('div'); lbl.className = 'arrow-label'; lbl.textContent = 'uncertain \u2192 debate';
         if ((state.debates || []).length) lbl.style.color = 'var(--purple)';
-        fb.appendChild(line);
-        fb.appendChild(lbl);
-        const line2 = document.createElement('div');
-        line2.className = 'arrow-line';
-        fb.appendChild(line2);
+        const l2 = document.createElement('div'); l2.className = 'arrow-line';
+        fb.appendChild(l1); fb.appendChild(lbl); fb.appendChild(l2);
         container.appendChild(fb);
       } else {
-        const conn = document.createElement('div');
-        conn.className = 'mode-connector';
+        const conn = document.createElement('div'); conn.className = 'mode-connector';
         if (i < currentIdx) conn.classList.add('done');
         container.appendChild(conn);
       }
@@ -584,7 +1242,6 @@ function renderPipelineFlow(state) {
   });
 }
 
-// ─── Stats ───
 function renderStats(state) {
   const tasks = state.task_graph?.tasks || [];
   document.getElementById('statCompleted').textContent = (state.completed_tasks || []).length;
@@ -593,246 +1250,445 @@ function renderStats(state) {
   document.getElementById('statSkills').textContent = (state.learned_skills || []).length;
   document.getElementById('statReflections').textContent = (state.reflections || []).length;
   document.getElementById('statDebates').textContent = (state.debates || []).length;
+  document.getElementById('statMarketStudies').textContent = (state.market_studies || []).length;
 }
 
-// ─── Active Agent ───
 function renderActiveAgent(state) {
   const body = document.getElementById('activeAgentBody');
   const badge = document.getElementById('currentModeBadge');
   const mode = state.current_mode || 'idle';
   const modeInfo = MODES.find(m => m.key === mode);
-
-  badge.textContent = modeInfo ? `Mode ${modeInfo.num}` : mode;
+  badge.textContent = modeInfo ? 'Mode ' + modeInfo.num : mode;
 
   const plans = state.plans || [];
   const currentPlan = plans[plans.length - 1];
   const currentTask = currentPlan?.task_title || currentPlan?.task_description || '';
-  const execResults = state.execution_results || [];
-  const lastExec = execResults[execResults.length - 1];
 
   let detail = '';
   switch (mode) {
-    case 'specification':
-      detail = '<strong>Gathering project specification</strong><br>Analyzing problem statement and asking clarifying questions';
-      break;
-    case 'task_graph':
-      detail = '<strong>Decomposing into task graph</strong><br>Breaking the spec into parallelizable tasks with dependencies';
-      break;
-    case 'planning':
-      detail = `<strong>Planning task execution</strong>${currentTask ? '<br>Task: ' + esc(currentTask) : ''}`;
-      break;
-    case 'controller':
-      detail = '<strong>Quality gate check</strong><br>Evaluating confidence and entropy thresholds';
-      break;
-    case 'execution':
-      detail = `<strong>Executing plan</strong>${currentTask ? '<br>Task: ' + esc(currentTask) : ''}`;
-      break;
-    case 'skill_learning':
-      detail = '<strong>Extracting reusable skills</strong><br>Learning patterns from successful execution';
-      break;
-    case 'reflection':
-      detail = `<strong>Reflecting on failure</strong>${lastExec?.error ? '<br>Error: ' + esc(lastExec.error) : ''}`;
-      break;
-    case 'debate':
-      detail = '<strong>Multi-perspective debate</strong><br>Resolving high-entropy uncertainty in plan';
-      break;
-    default:
-      detail = 'Pipeline idle';
+    case 'specification': detail = '<strong>Gathering project specification</strong><br>Analyzing problem statement and asking clarifying questions'; break;
+    case 'task_graph': detail = '<strong>Decomposing into task graph</strong><br>Breaking the spec into parallelizable tasks'; break;
+    case 'planning': detail = '<strong>Planning task execution</strong>' + (currentTask ? '<br>Task: ' + esc(currentTask) : ''); break;
+    case 'controller': detail = '<strong>Quality gate check</strong><br>Evaluating confidence and entropy thresholds'; break;
+    case 'execution': detail = '<strong>Executing plan</strong>' + (currentTask ? '<br>Task: ' + esc(currentTask) : ''); break;
+    case 'skill_learning': detail = '<strong>Extracting reusable skills</strong><br>Learning patterns from successful execution'; break;
+    case 'reflection': detail = '<strong>Reflecting on failure</strong>'; break;
+    case 'debate': detail = '<strong>Multi-perspective debate</strong><br>Resolving high-entropy uncertainty'; break;
+    default: detail = state._running ? 'Pipeline running...' : 'Pipeline idle';
   }
 
-  body.innerHTML = `
-    <div class="active-agent-info">
-      <div class="agent-mode">${modeInfo ? modeInfo.label : mode}</div>
-      <div class="agent-detail">${detail}</div>
-    </div>`;
+  body.innerHTML = '<div class="active-agent-info"><div class="agent-mode">' + (modeInfo ? modeInfo.label : mode) + '</div><div class="agent-detail">' + detail + '</div></div>';
 }
 
-// ─── Task Graph ───
 function renderTaskGraph(state) {
   const body = document.getElementById('taskGraphBody');
   const badge = document.getElementById('taskCountBadge');
   const tasks = state.task_graph?.tasks || [];
   const completed = new Set(state.completed_tasks || []);
   const failed = new Set(state.failed_tasks || []);
+  badge.textContent = tasks.length + ' task' + (tasks.length !== 1 ? 's' : '');
+  if (!tasks.length) { body.innerHTML = '<div class="empty-state">No tasks yet</div>'; return; }
 
-  badge.textContent = `${tasks.length} task${tasks.length !== 1 ? 's' : ''}`;
-
-  if (!tasks.length) {
-    body.innerHTML = '<div class="empty-state">No tasks yet</div>';
-    return;
-  }
-
-  // Group tasks by wave/priority
   const waves = {};
-  tasks.forEach(t => {
-    const w = t.wave ?? t.priority ?? 0;
-    if (!waves[w]) waves[w] = [];
-    waves[w].push(t);
-  });
-
+  tasks.forEach(t => { const w = t.wave ?? t.priority ?? 0; if (!waves[w]) waves[w] = []; waves[w].push(t); });
   let html = '';
-  Object.keys(waves).sort((a, b) => a - b).forEach(w => {
-    html += `<div class="wave-group">`;
-    html += `<div class="wave-label">Wave ${w}</div>`;
+  Object.keys(waves).sort((a,b) => a-b).forEach(w => {
+    html += '<div class="wave-group"><div class="wave-label">Wave ' + w + '</div>';
     waves[w].forEach(t => {
       let status = 'pending';
       if (completed.has(t.id)) status = 'completed';
       else if (failed.has(t.id)) status = 'failed';
-      // Check if this task is currently being worked on
       else if (state.plans && state.plans.length > completed.size + failed.size) {
-        const latestPlan = state.plans[state.plans.length - 1];
-        if (latestPlan && (latestPlan.task_id === t.id || latestPlan.task_title === t.title)) {
-          status = 'in_progress';
-        }
+        const lp = state.plans[state.plans.length-1];
+        if (lp && (lp.task_id === t.id || lp.task_title === t.title)) status = 'in_progress';
       }
       const deps = (t.depends_on || []).length;
-      html += `<div class="task-item">
-        <div class="task-status ${status}"></div>
-        <span class="task-title">${esc(t.title || t.id)}</span>
-        ${deps ? `<span class="task-deps">${deps} dep${deps > 1 ? 's' : ''}</span>` : ''}
-      </div>`;
+      html += '<div class="task-item"><div class="task-status '+status+'"></div><span class="task-title">' + esc(t.title||t.id) + '</span>' + (deps ? '<span class="task-deps">' + deps + ' dep' + (deps>1?'s':'') + '</span>' : '') + '</div>';
     });
-    html += `</div>`;
+    html += '</div>';
   });
-
   body.innerHTML = html;
 }
 
-// ─── Results Panel ───
 function renderResults(state) {
   const body = document.getElementById('resultsBody');
   const cards = [];
-
-  // Spec summary
   if (state.spec && Object.keys(state.spec).length) {
-    const spec = state.spec;
-    cards.push(makeCard(
-      `Specification: ${esc(spec.title || 'Untitled')}`,
-      'tag-blue',
-      `<pre>${esc(JSON.stringify(spec, null, 2))}</pre>`
-    ));
+    cards.push(makeCard('Specification: ' + esc(state.spec.title||'Untitled'), 'tag-blue', '<pre>' + esc(JSON.stringify(state.spec,null,2)) + '</pre>'));
   }
-
-  // Plans
   (state.plans || []).forEach((p, i) => {
-    const title = p.task_title || p.task_description || `Plan ${i + 1}`;
-    const steps = (p.steps || []).map(s => `• ${s.description || s.action || JSON.stringify(s)}`).join('\n');
-    cards.push(makeCard(
-      `Plan: ${esc(title)}`,
-      'tag-blue',
-      `<div>Confidence: ${p.confidence ?? '—'} | Entropy: ${p.entropy ?? '—'}</div>
-       ${steps ? `<pre>${esc(steps)}</pre>` : ''}`
-    ));
+    const title = p.task_title || p.task_description || 'Plan '+(i+1);
+    const steps = (p.steps||[]).map(s => '\u2022 ' + (s.description||s.action||JSON.stringify(s))).join('\n');
+    cards.push(makeCard('Plan: '+esc(title), 'tag-blue', '<div>Confidence: '+(p.confidence??'\u2014')+' | Entropy: '+(p.entropy??'\u2014')+'</div>'+(steps?'<pre>'+esc(steps)+'</pre>':'')));
   });
-
-  // Execution results
   (state.execution_results || []).forEach((r, i) => {
-    const success = r.success;
-    cards.push(makeCard(
-      `Execution ${i + 1}: ${success ? 'Success' : 'Failed'}`,
-      success ? 'tag-green' : 'tag-red',
-      `<pre>${esc(JSON.stringify(r, null, 2))}</pre>`
-    ));
+    cards.push(makeCard('Execution '+(i+1)+': '+(r.success?'Success':'Failed'), r.success?'tag-green':'tag-red', '<pre>'+esc(JSON.stringify(r,null,2))+'</pre>'));
   });
-
-  // Reflections
-  (state.reflections || []).forEach((r, i) => {
-    cards.push(makeCard(
-      `Reflection ${i + 1}`,
-      'tag-yellow',
-      `<pre>${esc(JSON.stringify(r, null, 2))}</pre>`
-    ));
+  (state.reflections || []).forEach((r, i) => { cards.push(makeCard('Reflection '+(i+1), 'tag-yellow', '<pre>'+esc(JSON.stringify(r,null,2))+'</pre>')); });
+  (state.debates || []).forEach((d, i) => { cards.push(makeCard('Debate '+(i+1), 'tag-purple', '<pre>'+esc(JSON.stringify(d,null,2))+'</pre>')); });
+  (state.market_studies || []).forEach((m, i) => {
+    const title = 'Market Study: ' + esc(m.task_id || 'Study '+(i+1));
+    let body = '';
+    if (m.target_audience) body += '<div><strong>Audience:</strong> '+esc(m.target_audience)+'</div>';
+    if (m.positioning) body += '<div><strong>Positioning:</strong> '+esc(m.positioning)+'</div>';
+    if (m.competitors && m.competitors.length) body += '<div><strong>Competitors:</strong> '+m.competitors.map(c=>esc(c)).join(', ')+'</div>';
+    if (m.recommendations && m.recommendations.length) body += '<div><strong>Recommendations:</strong><ul>'+m.recommendations.map(r=>'<li>'+esc(r)+'</li>').join('')+'</ul></div>';
+    if (m.risks && m.risks.length) body += '<div><strong>Risks:</strong><ul>'+m.risks.map(r=>'<li>'+esc(r)+'</li>').join('')+'</ul></div>';
+    cards.push(makeCard(title, 'tag-yellow', body || '<pre>'+esc(JSON.stringify(m,null,2))+'</pre>'));
   });
-
-  // Debates
-  (state.debates || []).forEach((d, i) => {
-    cards.push(makeCard(
-      `Debate ${i + 1}`,
-      'tag-purple',
-      `<pre>${esc(JSON.stringify(d, null, 2))}</pre>`
-    ));
-  });
-
-  // Skills
-  (state.learned_skills || []).forEach((s, i) => {
-    cards.push(makeCard(
-      `Skill: ${esc(s.name || `Skill ${i + 1}`)}`,
-      'tag-green',
-      `<div>${esc(s.description || '')}</div>
-       ${s.pattern ? `<pre>${esc(s.pattern)}</pre>` : ''}`
-    ));
-  });
-
-  if (cards.length === 0) {
-    body.innerHTML = '<div class="empty-state">Results will appear as the pipeline runs</div>';
-  } else {
-    body.innerHTML = cards.join('');
-  }
+  (state.learned_skills || []).forEach((s, i) => { cards.push(makeCard('Skill: '+esc(s.name||'Skill '+(i+1)), 'tag-green', '<div>'+esc(s.description||'')+'</div>'+(s.pattern?'<pre>'+esc(s.pattern)+'</pre>':''))); });
+  body.innerHTML = cards.length ? cards.join('') : '<div class="empty-state">Results will appear as the pipeline runs</div>';
 }
 
 function makeCard(title, tagClass, content) {
-  return `<div class="result-card" onclick="this.classList.toggle('open')">
-    <div class="result-card-header">
-      <span><span class="tag ${tagClass}">${title}</span></span>
-      <span class="result-card-chevron">&#9654;</span>
-    </div>
-    <div class="result-card-body">${content}</div>
-  </div>`;
+  return '<div class="result-card" onclick="this.classList.toggle(\'open\')"><div class="result-card-header"><span><span class="tag '+tagClass+'">'+title+'</span></span><span class="result-card-chevron">&#9654;</span></div><div class="result-card-body">'+content+'</div></div>';
 }
 
-function esc(s) {
-  if (typeof s !== 'string') s = String(s ?? '');
-  const div = document.createElement('div');
-  div.textContent = s;
-  return div.innerHTML;
-}
+let _renderedQuestionIds = null;
 
-// ─── State Fetching ───
-async function fetchState() {
-  try {
-    const resp = await fetch('/pipeline_state.json?t=' + Date.now());
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const state = await resp.json();
-    lastState = state;
-    setConnected(true);
-    render(state);
-  } catch (e) {
-    setConnected(false);
-    if (!lastState) {
-      // Show empty dashboard
-      render({
-        current_mode: '', spec: {}, task_graph: {},
-        plans: [], execution_results: [], learned_skills: [],
-        reflections: [], debates: [], completed_tasks: [], failed_tasks: [],
-      });
-    }
+function renderQuestions(state) {
+  const section = document.getElementById('questionSection');
+  const qs = state._pending_questions;
+  if (!qs || !qs.length) {
+    section.style.display = 'none';
+    _renderedQuestionIds = null;
+    return;
   }
+  section.style.display = '';
+
+  // Skip re-render if same questions are already shown (prevents clearing user input)
+  const newIds = qs.map(q => q.id).join(',');
+  if (_renderedQuestionIds === newIds) return;
+  _renderedQuestionIds = newIds;
+
+  let html = '<div class="question-card"><h3>Questions need your input</h3>';
+  if (state._pending_understanding) {
+    html += '<div style="font-size:13px;color:var(--text-dim);margin-bottom:16px;">' + esc(state._pending_understanding) + '</div>';
+  }
+
+  qs.forEach(q => {
+    html += '<div class="question-item">';
+    html += '<div class="q-text">' + esc(q.question) + '</div>';
+    if (q.why) html += '<div class="q-why">' + esc(q.why) + '</div>';
+    if (q.options && q.options.length) {
+      html += '<div class="q-options">';
+      q.options.forEach((opt, i) => {
+        html += '<label class="q-option" onclick="this.parentElement.querySelectorAll(\'.q-option\').forEach(o=>o.classList.remove(\'selected\'));this.classList.add(\'selected\')">';
+        html += '<input type="radio" name="q_' + esc(q.id) + '" data-qid="' + esc(q.id) + '" value="' + esc(opt) + '"> ' + esc(opt);
+        html += '</label>';
+      });
+      html += '</div>';
+      html += '<input type="text" class="q-custom-input" data-qid-custom="' + esc(q.id) + '" placeholder="Or type a custom answer...">';
+    } else {
+      html += '<input type="text" class="q-custom-input" data-qid="' + esc(q.id) + '" placeholder="Your answer...">';
+    }
+    html += '</div>';
+  });
+
+  html += '<button class="btn" onclick="submitAnswers()" style="margin-top:8px">Submit Answers</button>';
+  html += '</div>';
+  section.innerHTML = html;
 }
 
-function setConnected(ok) {
-  connected = ok;
+// ─── Rendering: Agents Tab ───
+const agentLogGroups = {};  // keyed by agent name
+
+function renderActivities(entries) {
+  if (!entries.length) return;
+  const feed = document.getElementById('activityFeed');
+  const empty = document.getElementById('activityEmpty');
+  if (empty) empty.remove();
+
+  entries.forEach(e => {
+    const agentName = e.agent || 'unknown';
+
+    // Find or create the <details> group for this agent
+    if (!agentLogGroups[agentName]) {
+      const details = document.createElement('details');
+      details.className = 'agent-group';
+
+      const summary = document.createElement('summary');
+      const chevron = document.createElement('span');
+      chevron.className = 'group-chevron';
+      chevron.innerHTML = '&#9654;';
+
+      const badge = document.createElement('span');
+      badge.className = 'activity-agent ' + (AGENT_COLORS[agentName] || 'agent-orchestrator');
+      badge.textContent = agentName;
+
+      const count = document.createElement('span');
+      count.className = 'group-count';
+      count.textContent = '0';
+
+      const latest = document.createElement('span');
+      latest.className = 'group-latest';
+      latest.textContent = '';
+
+      const statusDot = document.createElement('span');
+      statusDot.className = 'activity-status-dot';
+      statusDot.style.background = STATUS_COLORS.info;
+
+      summary.appendChild(chevron);
+      summary.appendChild(badge);
+      summary.appendChild(count);
+      summary.appendChild(latest);
+      summary.appendChild(statusDot);
+      details.appendChild(summary);
+
+      const body = document.createElement('div');
+      body.className = 'agent-group-body';
+      details.appendChild(body);
+
+      feed.appendChild(details);
+      agentLogGroups[agentName] = { details, count, latest, statusDot, body, n: 0 };
+    }
+
+    const group = agentLogGroups[agentName];
+    group.n++;
+    group.count.textContent = group.n;
+    group.latest.textContent = (e.action || '') + (e.detail ? ' — ' + e.detail : '');
+    group.statusDot.style.background = STATUS_COLORS[e.status] || STATUS_COLORS.info;
+
+    // Add entry row inside the group body
+    const div = document.createElement('div');
+    div.className = 'activity-entry';
+
+    const ts = document.createElement('span');
+    ts.className = 'activity-ts';
+    ts.textContent = fmtTime(e.ts);
+
+    const action = document.createElement('span');
+    action.className = 'activity-action';
+    action.textContent = e.action;
+
+    const detail = document.createElement('span');
+    detail.className = 'activity-detail';
+    detail.textContent = e.detail || '';
+
+    const dot = document.createElement('span');
+    dot.className = 'activity-status-dot';
+    dot.style.background = STATUS_COLORS[e.status] || STATUS_COLORS.info;
+
+    div.appendChild(ts);
+    div.appendChild(action);
+    div.appendChild(detail);
+    div.appendChild(dot);
+    group.body.appendChild(div);
+  });
+
+  if (currentTab === 'agents') scrollActivity();
+  else document.getElementById('agentsBadge').classList.add('visible');
+}
+
+function scrollActivity() {
+  const feed = document.getElementById('activityFeed');
+  feed.scrollTop = feed.scrollHeight;
+}
+
+// ─── Rendering: Chat Tab ───
+function renderChatMessages(entries) {
+  if (!entries.length) return;
+  const container = document.getElementById('chatMessages');
+  const empty = document.getElementById('chatEmpty');
+  if (empty) empty.remove();
+
+  entries.forEach(e => {
+    const div = document.createElement('div');
+    div.className = 'chat-msg ' + (e.role || 'system');
+
+    if (e.role === 'question' && e.questions) {
+      // Render question card in chat
+      let html = '<strong style="color:var(--yellow)">Questions:</strong><br>';
+      e.questions.forEach(q => {
+        html += '<div style="margin-top:8px"><strong>' + esc(q.question) + '</strong></div>';
+        if (q.why) html += '<div style="font-size:12px;opacity:0.7">' + esc(q.why) + '</div>';
+        if (q.options && q.options.length) {
+          html += '<div style="margin-top:4px;font-size:12px">' + q.options.map(o => '\u2022 ' + esc(o)).join('<br>') + '</div>';
+        }
+      });
+      div.innerHTML = html;
+    } else {
+      div.innerHTML = esc(e.text) + '<div class="chat-ts">' + fmtTime(e.ts) + '</div>';
+    }
+
+    container.appendChild(div);
+  });
+
+  if (currentTab === 'chat') scrollChat();
+  else document.getElementById('chatBadge').classList.add('visible');
+}
+
+function scrollChat() {
+  const container = document.getElementById('chatMessages');
+  container.scrollTop = container.scrollHeight;
+}
+
+// ─── Rendering: Logs Tab ───
+function renderLogs(entries) {
+  if (!entries.length) return;
+  const feed = document.getElementById('logsFeed');
+  const empty = document.getElementById('logsEmpty');
+  if (empty) empty.remove();
+
+  entries.forEach(e => {
+    logsTotals.calls++;
+    logsTotals.input += (e.est_input_tokens || 0);
+    logsTotals.output += (e.est_output_tokens || 0);
+    logsTotals.time += (e.duration || 0);
+
+    const entry = document.createElement('div');
+    entry.className = 'log-entry';
+    entry.onclick = function(ev) {
+      if (ev.target.closest('.log-entry-body')) return;
+      this.classList.toggle('open');
+    };
+
+    const header = document.createElement('div');
+    header.className = 'log-entry-header';
+
+    const chevron = document.createElement('span');
+    chevron.className = 'log-chevron';
+    chevron.innerHTML = '&#9654;';
+
+    const ts = document.createElement('span');
+    ts.className = 'log-ts';
+    ts.textContent = fmtTime(e.ts);
+
+    const badge = document.createElement('span');
+    badge.className = 'activity-agent ' + (AGENT_COLORS[e.agent] || 'agent-orchestrator');
+    badge.textContent = e.agent || 'unknown';
+
+    const dur = document.createElement('span');
+    dur.className = 'log-duration';
+    dur.textContent = (e.duration || 0).toFixed(1) + 's';
+
+    const tokens = document.createElement('span');
+    tokens.className = 'log-tokens';
+    tokens.textContent = '~' + (e.est_input_tokens || 0) + ' / ' + (e.est_output_tokens || 0);
+
+    const preview = document.createElement('span');
+    preview.className = 'log-preview';
+    const responsePreview = (e.response || '').substring(0, 120).replace(/\n/g, ' ');
+    preview.textContent = responsePreview || '(empty response)';
+
+    header.appendChild(chevron);
+    header.appendChild(ts);
+    header.appendChild(badge);
+    header.appendChild(dur);
+    header.appendChild(tokens);
+    header.appendChild(preview);
+    entry.appendChild(header);
+
+    // Expandable body
+    const body = document.createElement('div');
+    body.className = 'log-entry-body';
+
+    const sysLabel = document.createElement('div');
+    sysLabel.className = 'log-section-label';
+    sysLabel.textContent = 'System Prompt';
+    body.appendChild(sysLabel);
+
+    const sysContent = document.createElement('div');
+    sysContent.className = 'log-content';
+    sysContent.textContent = e.system_prompt || '(none)';
+    body.appendChild(sysContent);
+
+    const userLabel = document.createElement('div');
+    userLabel.className = 'log-section-label';
+    userLabel.textContent = 'User Prompt';
+    body.appendChild(userLabel);
+
+    const userContent = document.createElement('div');
+    userContent.className = 'log-content';
+    userContent.textContent = e.user_prompt || '(none)';
+    body.appendChild(userContent);
+
+    const respLabel = document.createElement('div');
+    respLabel.className = 'log-section-label';
+    respLabel.textContent = 'Response';
+    body.appendChild(respLabel);
+
+    const respContent = document.createElement('div');
+    respContent.className = 'log-content';
+    respContent.textContent = e.response || '(empty)';
+    body.appendChild(respContent);
+
+    entry.appendChild(body);
+    feed.appendChild(entry);
+  });
+
+  // Update totals
+  document.getElementById('logsTotalCalls').textContent = logsTotals.calls;
+  document.getElementById('logsTotalInput').textContent = '~' + logsTotals.input.toLocaleString();
+  document.getElementById('logsTotalOutput').textContent = '~' + logsTotals.output.toLocaleString();
+  document.getElementById('logsTotalTime').textContent = logsTotals.time.toFixed(1) + 's';
+
+  if (currentTab === 'logs') scrollLogs();
+  else document.getElementById('logsBadge').classList.add('visible');
+}
+
+function scrollLogs() {
+  const feed = document.getElementById('logsFeed');
+  feed.scrollTop = feed.scrollHeight;
+}
+
+// ─── Status Indicator ───
+function updateStatus(state) {
   const dot = document.getElementById('statusDot');
   const label = document.getElementById('statusLabel');
-  if (ok) {
-    dot.className = 'status-dot';
-    label.textContent = 'Live';
+  if (state._error) {
+    dot.className = 'status-dot error';
+    label.textContent = 'Error';
+  } else if (state._running) {
+    dot.className = 'status-dot running';
+    label.textContent = 'Running';
+  } else if (state.title) {
+    dot.className = 'status-dot live';
+    label.textContent = 'Connected';
   } else {
-    dot.className = 'status-dot disconnected';
-    label.textContent = 'No data';
+    dot.className = 'status-dot';
+    label.textContent = 'Idle';
   }
 }
 
-function render(state) {
-  renderPipelineFlow(state);
-  renderStats(state);
-  renderActiveAgent(state);
-  renderTaskGraph(state);
-  renderResults(state);
+// ─── Polling Loop ───
+async function poll() {
+  try {
+    const [state, activities, chat, logs] = await Promise.all([
+      fetchJson(apiUrl('api/state')),
+      fetchJson(apiUrl('api/activities?since=' + activityCursor)),
+      fetchJson(apiUrl('api/chat?since=' + chatCursor)),
+      fetchJson(apiUrl('api/logs?since=' + logsCursor)),
+    ]);
+
+    lastState = state;
+    updateStatus(state);
+
+    // Update cursors
+    if (activities.cursor != null) activityCursor = activities.cursor;
+    if (chat.cursor != null) chatCursor = chat.cursor;
+    if (logs.cursor != null) logsCursor = logs.cursor;
+
+    // Render based on active tab (always update project for question visibility)
+    renderProjectTab(state);
+    renderActivities(activities.entries || []);
+    renderChatMessages(chat.entries || []);
+    renderLogs(logs.entries || []);
+
+    // Load runs list once
+    if (!runsLoaded) loadRuns();
+  } catch (e) {
+    const dot = document.getElementById('statusDot');
+    const label = document.getElementById('statusLabel');
+    dot.className = 'status-dot';
+    label.textContent = 'Disconnected';
+  }
 }
 
-// Auto-refresh every 2 seconds
-fetchState();
-setInterval(fetchState, 2000);
+// Initial load
+loadRuns();
+poll();
+setInterval(poll, 2000);
 </script>
 </body>
 </html>

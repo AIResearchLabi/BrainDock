@@ -8,7 +8,7 @@ from BrainDock.base_agent import BaseAgent
 from BrainDock.llm import LLMBackend
 from .models import TaskOutcome, StopCondition, ExecutionResult
 from .prompts import SYSTEM_PROMPT, EXECUTE_STEP_PROMPT, VERIFY_STEP_PROMPT
-from .sandbox import run_sandboxed, write_file_safe
+from .sandbox import run_sandboxed, write_file_safe, read_file_safe
 
 
 class ExecutorAgent(BaseAgent):
@@ -32,6 +32,7 @@ class ExecutorAgent(BaseAgent):
         step: dict,
         project_dir: str,
         previous_outcomes: list[dict],
+        project_file_context: str = "",
     ) -> TaskOutcome:
         """Execute a single action step.
 
@@ -39,26 +40,57 @@ class ExecutorAgent(BaseAgent):
             step: ActionStep as a dict.
             project_dir: Project root directory.
             previous_outcomes: List of previous step outcome dicts.
+            project_file_context: Context string describing existing project files.
 
         Returns:
             TaskOutcome with success status and output.
         """
         prev_str = json.dumps(previous_outcomes[-3:], indent=2) if previous_outcomes else "(none)"
 
+        # Build edit_file context if this step's tool is edit_file
+        edit_file_context = ""
+        step_tool = step.get("tool", "")
+        if step_tool == "edit_file":
+            # Try to find the target file path from the step
+            target_path = step.get("file_path", "") or step.get("description", "")
+            # Look for file paths in description if not explicit
+            if not step.get("file_path"):
+                for word in step.get("description", "").split():
+                    if "/" in word or word.endswith((".py", ".js", ".ts", ".json", ".html", ".css")):
+                        target_path = word.strip("'\"`,;:")
+                        break
+            if target_path:
+                content = read_file_safe(target_path, project_dir)
+                if content is not None:
+                    edit_file_context = (
+                        f"Current content of {target_path}:\n"
+                        f"---\n{content[:6000]}\n---"
+                    )
+
         prompt = EXECUTE_STEP_PROMPT.format(
             step_json=json.dumps(step, indent=2),
             project_dir=project_dir,
             previous_outcomes=prev_str,
             step_id=step.get("id", ""),
+            project_file_context=project_file_context or "(no files yet)",
+            edit_file_context=edit_file_context,
         )
 
         data = self._llm_query_json(SYSTEM_PROMPT, prompt)
         action_type = data.get("action_type", "")
         file_path = data.get("file_path", "")
         content = data.get("content", "")
+        affected_file = ""
 
         if action_type == "write_file" and file_path:
             success, output = write_file_safe(file_path, content, project_dir)
+            if success:
+                affected_file = file_path
+        elif action_type == "edit_file" and file_path:
+            # edit_file now writes the full new content via write_file_safe
+            success, output = write_file_safe(file_path, content, project_dir)
+            if success:
+                affected_file = file_path
         elif action_type == "create_dir" and file_path:
             success, output = write_file_safe(
                 file_path + "/.gitkeep", "", project_dir
@@ -69,7 +101,6 @@ class ExecutorAgent(BaseAgent):
                 timeout=self.stop_condition.timeout_seconds,
             )
         else:
-            # For edit_file or other types, treat content as the result
             success = True
             output = content or "(no output)"
 
@@ -78,18 +109,21 @@ class ExecutorAgent(BaseAgent):
             success=success,
             output=output[:2000],  # Truncate long outputs
             error="" if success else output[:500],
+            affected_file=affected_file,
         )
 
     def execute(
         self,
         plan: dict,
         project_dir: str = ".",
+        project_file_context: str = "",
     ) -> ExecutionResult:
         """Execute all steps in an action plan.
 
         Args:
             plan: ActionPlan as a dict (from ActionPlan.to_dict()).
             project_dir: Project root directory.
+            project_file_context: Context string describing existing project files.
 
         Returns:
             ExecutionResult with overall success and per-step outcomes.
@@ -129,8 +163,12 @@ class ExecutorAgent(BaseAgent):
                 step,
                 project_dir=project_dir,
                 previous_outcomes=[o.to_dict() for o in outcomes],
+                project_file_context=project_file_context,
             )
             outcomes.append(outcome)
+
+            if outcome.affected_file and outcome.affected_file not in generated_files:
+                generated_files.append(outcome.affected_file)
 
             if not outcome.success:
                 failure_count += 1

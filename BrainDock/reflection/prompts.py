@@ -29,6 +29,11 @@ Project context:
 
 Iteration: {iteration} of {max_iterations}
 
+Pay special attention to:
+- Verification errors (runtime failures, import errors, missing deps)
+- Existing files that may need editing rather than rewriting
+- File path mismatches between plan and actual project
+
 Analyze the root cause(s) and propose modifications to the plan.
 
 Respond in this exact JSON format:

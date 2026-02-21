@@ -24,6 +24,9 @@ Project context:
 
 {skills_section}
 
+When files already exist in the project, prefer edit_file over write_file to \
+preserve existing code. Reference specific existing files by their paths.
+
 Create a step-by-step plan. Each step should be a concrete, executable action.
 Rate your confidence and estimate the uncertainty (entropy).
 

@@ -150,12 +150,17 @@ def _print_help():
     print()
     print("Options:")
     print("  --help, -h           Show this help message")
+    print("  --title TITLE        Project title (used for resume & output directory)")
+    print("  --resume TITLE       Resume a previous run by title")
+    print("  --list               List all existing runs")
     print("  --plan-only          Stop after planning (skip execution)")
     print("  --no-skill-learning  Skip skill extraction")
-    print("  --output-dir DIR     Output directory (default: output)")
+    print("  --output-dir DIR     Base output directory (default: output)")
     print()
     print("Examples:")
-    print('  python -m BrainDock "Build a todo app with authentication"')
+    print('  python -m BrainDock --title "makeup-store" "Build a makeup e-commerce site"')
+    print('  python -m BrainDock --resume "makeup-store"')
+    print("  python -m BrainDock --list")
     print("  python -m BrainDock --plan-only")
     print()
     print("Individual modules:")
@@ -166,7 +171,48 @@ def _print_help():
     print()
     print("Dashboard:")
     print("  python -m BrainDock.dashboard          -- Live pipeline dashboard")
-    print("  python -m BrainDock.dashboard --port N  -- Custom port (default: 8080)")
+    print("  python -m BrainDock.dashboard --port N  -- Custom port (default: 3000)")
+
+
+def _get_flag_value(flag: str) -> str | None:
+    """Get the value of a --flag VALUE pair from sys.argv."""
+    if flag in sys.argv:
+        idx = sys.argv.index(flag)
+        if idx + 1 < len(sys.argv):
+            return sys.argv[idx + 1]
+    return None
+
+
+def _list_runs(output_dir: str):
+    """Print all existing pipeline runs."""
+    runs = OrchestratorAgent.list_runs(output_dir)
+    if not runs:
+        print("  No runs found.")
+        print()
+        return
+
+    print(f"  {_bold(str(len(runs)))} run(s) found in {_cyan(output_dir)}/")
+    print(_dim("  " + "-" * 55))
+    print()
+    for r in runs:
+        completed = r["completed"]
+        total = r["total"]
+        failed = r["failed"]
+        status_str = f"{completed}/{total} tasks"
+        if failed:
+            status_str += f" ({failed} failed)"
+
+        print(f"  {_bold(r['title'])}")
+        print(f"    {_dim('Slug:')}    {r['slug']}")
+        print(f"    {_dim('Mode:')}    {r['mode']}")
+        print(f"    {_dim('Tasks:')}   {status_str}")
+        if r["problem"]:
+            preview = r["problem"][:80] + ("..." if len(r["problem"]) > 80 else "")
+            print(f"    {_dim('Prompt:')}  {preview}")
+        print()
+
+    print(_dim("  Resume with: python -m BrainDock --resume \"<title>\""))
+    print()
 
 
 def main():
@@ -186,30 +232,58 @@ def main():
     if "--no-skill-learning" in sys.argv:
         config.skip_skill_learning = True
 
-    if "--output-dir" in sys.argv:
-        idx = sys.argv.index("--output-dir")
-        if idx + 1 < len(sys.argv):
-            config.output_dir = sys.argv[idx + 1]
+    output_dir_val = _get_flag_value("--output-dir")
+    if output_dir_val:
+        config.output_dir = output_dir_val
 
-    # Get problem statement
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    # Filter out values of --output-dir
-    if "--output-dir" in sys.argv:
-        idx = sys.argv.index("--output-dir")
-        if idx + 1 < len(sys.argv):
-            val = sys.argv[idx + 1]
-            args = [a for a in args if a != val]
+    # ── --list: show all runs and exit ──
+    if "--list" in sys.argv:
+        _list_runs(config.output_dir)
+        sys.exit(0)
 
-    if args:
-        problem = " ".join(args)
-    else:
-        print("  Describe your project idea or problem statement.")
-        print(_dim("  (Be as detailed or brief as you'd like)"))
-        print()
-        problem = input(_green("  > ")).strip()
+    # ── Parse --title and --resume ──
+    title = _get_flag_value("--title")
+    resume_title = _get_flag_value("--resume")
+
+    # Collect flag values to filter from positional args
+    flag_values = set()
+    for flag in ("--output-dir", "--title", "--resume"):
+        val = _get_flag_value(flag)
+        if val:
+            flag_values.add(val)
+
+    # Get problem statement from positional args
+    args = [a for a in sys.argv[1:] if not a.startswith("--") and a not in flag_values]
+
+    if resume_title:
+        # Resume mode: title is required, problem is optional
+        title = resume_title
+        problem = " ".join(args) if args else ""
+        # Load the original problem from state if not provided
+        from .models import slugify
+        slug = slugify(resume_title)
+        state_path = os.path.join(config.output_dir, slug, "pipeline_state.json")
+        if not problem and os.path.isfile(state_path):
+            import json
+            with open(state_path) as f:
+                data = json.load(f)
+            problem = data.get("problem", "")
         if not problem:
-            print("  No problem statement provided. Exiting.")
+            print(_red(f"  No run found with title \"{resume_title}\""))
+            print(_dim("  Use --list to see available runs."))
             sys.exit(1)
+        print(f"  Resuming: {_bold(resume_title)}")
+    else:
+        if args:
+            problem = " ".join(args)
+        else:
+            print("  Describe your project idea or problem statement.")
+            print(_dim("  (Be as detailed or brief as you'd like)"))
+            print()
+            problem = input(_green("  > ")).strip()
+            if not problem:
+                print("  No problem statement provided. Exiting.")
+                sys.exit(1)
 
     print(f"  Problem: {_bold(problem)}")
     print()
@@ -219,8 +293,11 @@ def main():
 
     print(_dim("  Starting pipeline..."))
     print()
+    print(_cyan("  Dashboard: ") + _bold("python -m BrainDock.dashboard --output-dir " + config.output_dir))
+    print(_cyan("             ") + _dim("http://localhost:3000"))
+    print()
 
-    state = orchestrator.run(problem=problem, ask_fn=_ask_user)
+    state = orchestrator.run(problem=problem, ask_fn=_ask_user, title=title)
 
     # Summary
     print()
@@ -228,6 +305,7 @@ def main():
     print(_green("  Pipeline Complete!"))
     print(_bold("=" * 60))
     print()
+    print(f"  Title: {_cyan(state.title)}")
     print(f"  Spec: {_cyan(state.spec.get('title', 'N/A'))}")
     print(f"  Tasks: {len(state.task_graph.get('tasks', []))}")
     print(f"  Plans: {len(state.plans)}")
@@ -237,7 +315,10 @@ def main():
     print(f"  Reflections: {len(state.reflections)}")
     print(f"  Debates: {len(state.debates)}")
     print()
-    print(f"  Output: {_cyan(config.output_dir)}/")
+    from .models import slugify
+    run_dir = os.path.join(config.output_dir, slugify(state.title))
+    print(f"  Output: {_cyan(run_dir)}/")
+    print(_dim(f"  Resume: python -m BrainDock --resume \"{state.title}\""))
     print()
 
 

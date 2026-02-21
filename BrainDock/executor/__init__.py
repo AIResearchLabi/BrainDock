@@ -9,12 +9,13 @@ Usage:
     result = agent.execute(plan_dict, project_dir)
 """
 
-from .models import TaskOutcome, StopCondition, ExecutionResult
+from .models import TaskOutcome, StopCondition, ExecutionResult, VerifyResult
 from .agent import ExecutorAgent
 
 __all__ = [
     "TaskOutcome",
     "StopCondition",
     "ExecutionResult",
+    "VerifyResult",
     "ExecutorAgent",
 ]

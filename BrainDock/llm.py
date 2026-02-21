@@ -9,7 +9,8 @@ from __future__ import annotations
 import subprocess
 import json
 import os
-from typing import Callable, Protocol
+import time as _time
+from typing import Any, Callable, Protocol
 
 
 class LLMBackend(Protocol):
@@ -20,8 +21,9 @@ class LLMBackend(Protocol):
 class ClaudeCLIBackend:
     """Uses `claude -p` subprocess as the LLM backend."""
 
-    def __init__(self, model: str | None = None):
+    def __init__(self, model: str | None = None, timeout: int = 900):
         self.model = model
+        self.timeout = timeout
 
     def query(self, system_prompt: str, user_prompt: str) -> str:
         full_prompt = f"{system_prompt}\n\n{user_prompt}"
@@ -40,7 +42,7 @@ class ClaudeCLIBackend:
             input=full_prompt,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=self.timeout,
             env=env,
         )
 
@@ -60,6 +62,51 @@ class CallableBackend:
 
     def query(self, system_prompt: str, user_prompt: str) -> str:
         return self._fn(system_prompt, user_prompt)
+
+
+class LoggingBackend:
+    """Wraps any LLMBackend, capturing every call for logging/dashboard.
+
+    Each call records: agent label, prompts, response, duration, and
+    estimated token count. Calls an optional ``on_log`` callback with
+    the log entry dict.
+    """
+
+    def __init__(self, inner: LLMBackend, on_log: Callable[[dict], Any] | None = None):
+        self._inner = inner
+        self._on_log = on_log
+        self._agent_label: str = "unknown"
+
+    def set_agent_label(self, label: str) -> None:
+        """Set the agent label for the next call(s)."""
+        self._agent_label = label
+
+    def query(self, system_prompt: str, user_prompt: str) -> str:
+        start = _time.time()
+        response = self._inner.query(system_prompt, user_prompt)
+        duration = _time.time() - start
+
+        # Rough token estimate: ~4 chars per token for English text
+        prompt_chars = len(system_prompt) + len(user_prompt)
+        response_chars = len(response)
+        est_input_tokens = prompt_chars // 4
+        est_output_tokens = response_chars // 4
+
+        entry: dict[str, Any] = {
+            "ts": start,
+            "agent": self._agent_label,
+            "duration": round(duration, 2),
+            "system_prompt": system_prompt,
+            "user_prompt": user_prompt,
+            "response": response,
+            "est_input_tokens": est_input_tokens,
+            "est_output_tokens": est_output_tokens,
+        }
+
+        if self._on_log:
+            self._on_log(entry)
+
+        return response
 
 
 def extract_json(text: str) -> dict:

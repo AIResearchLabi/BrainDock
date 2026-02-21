@@ -30,6 +30,9 @@ Rules:
 - Mark estimated effort: "small" (< 1 hour), "medium" (1-4 hours), "large" (4+ hours)
 - Use task IDs like "t1", "t2", etc.
 - depends_on references other task IDs
+- Tag tasks that involve user-facing features, pricing, product positioning, or \
+competitive differentiation with "needs_market_study" in the "tags" array. \
+Other tasks should have an empty tags array.
 
 Respond in this exact JSON format:
 {{
@@ -41,6 +44,7 @@ Respond in this exact JSON format:
       "description": "What to implement, with specifics",
       "depends_on": [],
       "estimated_effort": "small",
+      "tags": [],
       "risks": [
         {{
           "description": "What could go wrong",

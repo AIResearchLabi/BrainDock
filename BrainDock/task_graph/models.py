@@ -34,6 +34,7 @@ class TaskNode:
     depends_on: list[str] = field(default_factory=list)
     estimated_effort: str = "medium"  # small | medium | large
     risks: list[RiskNode] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
     status: str = "pending"  # pending | in_progress | completed | failed
     output: str = ""
 
@@ -54,6 +55,7 @@ class TaskNode:
             depends_on=data.get("depends_on", []),
             estimated_effort=data.get("estimated_effort", "medium"),
             risks=risks,
+            tags=data.get("tags", []),
             status=data.get("status", "pending"),
             output=data.get("output", ""),
         )

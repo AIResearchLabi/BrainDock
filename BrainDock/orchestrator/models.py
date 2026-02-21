@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 from typing import Any
@@ -48,9 +49,20 @@ class RunConfig:
         )
 
 
+def slugify(text: str) -> str:
+    """Convert text to a filesystem-safe slug."""
+    text = text.lower().strip()
+    text = re.sub(r"[^\w\s-]", "", text)
+    text = re.sub(r"[\s_-]+", "-", text)
+    text = text.strip("-")
+    return text[:80] or "untitled"
+
+
 @dataclass
 class PipelineState:
     """Tracks the state of the entire pipeline run."""
+    title: str = ""
+    problem: str = ""
     current_mode: str = Mode.SPECIFICATION.value
     spec: dict = field(default_factory=dict)
     task_graph: dict = field(default_factory=dict)
@@ -59,8 +71,10 @@ class PipelineState:
     learned_skills: list[dict] = field(default_factory=list)
     reflections: list[dict] = field(default_factory=list)
     debates: list[dict] = field(default_factory=list)
+    market_studies: list[dict] = field(default_factory=list)
     completed_tasks: list[str] = field(default_factory=list)
     failed_tasks: list[str] = field(default_factory=list)
+    verification_results: list[dict] = field(default_factory=list)
     error: str = ""
 
     def to_dict(self) -> dict:
@@ -70,9 +84,11 @@ class PipelineState:
     def from_dict(cls, data: dict) -> PipelineState:
         state = cls()
         for key in (
+            "title", "problem",
             "current_mode", "spec", "task_graph", "plans",
             "execution_results", "learned_skills", "reflections",
-            "debates", "completed_tasks", "failed_tasks", "error",
+            "debates", "market_studies", "completed_tasks", "failed_tasks",
+            "verification_results", "error",
         ):
             if key in data:
                 setattr(state, key, data[key])

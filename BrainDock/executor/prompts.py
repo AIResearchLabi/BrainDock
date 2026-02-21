@@ -19,6 +19,13 @@ Step:
 
 Project directory: {project_dir}
 
+Current project files:
+---
+{project_file_context}
+---
+
+{edit_file_context}
+
 Previous step outcomes:
 ---
 {previous_outcomes}
@@ -26,7 +33,8 @@ Previous step outcomes:
 
 Produce the exact implementation for this step. If the step involves writing \
 code, include the complete file content. If it involves running a command, \
-include the exact command.
+include the exact command. If editing an existing file, provide the complete \
+updated file content (not a diff).
 
 Respond in this exact JSON format:
 {{

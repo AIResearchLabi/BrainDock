@@ -12,6 +12,7 @@ class TaskOutcome:
     success: bool
     output: str = ""
     error: str = ""
+    affected_file: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -23,7 +24,23 @@ class TaskOutcome:
             success=data["success"],
             output=data.get("output", ""),
             error=data.get("error", ""),
+            affected_file=data.get("affected_file", ""),
         )
+
+
+@dataclass
+class VerifyResult:
+    """Result of running project verification."""
+    success: bool
+    command: str = ""
+    stdout: str = ""
+    stderr: str = ""
+    exit_code: int = -1
+    error_summary: str = ""
+    detection_method: str = ""
+
+    def to_dict(self) -> dict:
+        return asdict(self)
 
 
 @dataclass

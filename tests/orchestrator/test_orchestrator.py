@@ -64,6 +64,7 @@ TASK_GRAPH = json.dumps({
             "description": "Write the main calculator with eval support",
             "depends_on": [],
             "estimated_effort": "small",
+            "tags": [],
             "risks": [],
         }
     ],
@@ -215,9 +216,10 @@ class TestOrchestratorPlanOnly(unittest.TestCase):
         # Should NOT have execution results (plan-only)
         self.assertEqual(len(state.execution_results), 0)
 
-        # Output files should exist
-        self.assertTrue(os.path.exists(os.path.join(self._tmpdir, "spec_agent", "spec.json")))
-        self.assertTrue(os.path.exists(os.path.join(self._tmpdir, "task_graph", "task_graph.json")))
+        # Output files should exist (under slugified project dir)
+        project_dir = os.path.join(self._tmpdir, "build-a-cli-calculator")
+        self.assertTrue(os.path.exists(os.path.join(project_dir, "spec_agent", "spec.json")))
+        self.assertTrue(os.path.exists(os.path.join(project_dir, "task_graph", "task_graph.json")))
 
 
 class TestOrchestratorFullPipeline(unittest.TestCase):
@@ -260,6 +262,265 @@ class TestOrchestratorFullPipeline(unittest.TestCase):
 
         self.assertEqual(state.completed_tasks, ["t1"])
         self.assertEqual(len(state.learned_skills), 0)
+
+
+class TestProjectMemory(unittest.TestCase):
+    """Test the project_memory module."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_scan_empty_dir(self):
+        from BrainDock.project_memory import scan_project
+        snapshot = scan_project(self._tmpdir)
+        self.assertEqual(snapshot.total_files, 0)
+        self.assertEqual(snapshot.key_file_contents, {})
+        self.assertIn("empty", snapshot.to_context_string())
+
+    def test_scan_with_files(self):
+        from BrainDock.project_memory import scan_project
+        # Create some files
+        with open(os.path.join(self._tmpdir, "main.py"), "w") as f:
+            f.write("print('hello')\n")
+        with open(os.path.join(self._tmpdir, "utils.py"), "w") as f:
+            f.write("def helper(): pass\n")
+
+        snapshot = scan_project(self._tmpdir)
+        self.assertEqual(snapshot.total_files, 2)
+        self.assertIn("main.py", snapshot.key_file_contents)
+        ctx = snapshot.to_context_string()
+        self.assertIn("main.py", ctx)
+        self.assertIn("print('hello')", ctx)
+
+    def test_scan_skips_binary(self):
+        from BrainDock.project_memory import scan_project
+        with open(os.path.join(self._tmpdir, "image.png"), "wb") as f:
+            f.write(b"\x89PNG\r\n")
+        with open(os.path.join(self._tmpdir, "main.py"), "w") as f:
+            f.write("x = 1\n")
+
+        snapshot = scan_project(self._tmpdir)
+        self.assertNotIn("image.png", snapshot.key_file_contents)
+        self.assertIn("main.py", snapshot.key_file_contents)
+
+    def test_scan_prioritizes_key_files(self):
+        from BrainDock.project_memory import scan_project
+        # main.py should come before random files
+        with open(os.path.join(self._tmpdir, "main.py"), "w") as f:
+            f.write("entry\n")
+        with open(os.path.join(self._tmpdir, "zzz_other.py"), "w") as f:
+            f.write("other\n")
+
+        snapshot = scan_project(self._tmpdir)
+        keys = list(snapshot.key_file_contents.keys())
+        self.assertEqual(keys[0], "main.py")
+
+
+class TestVerifyProject(unittest.TestCase):
+    """Test the verify_project function."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_verify_success(self):
+        from BrainDock.executor.sandbox import verify_project
+        with open(os.path.join(self._tmpdir, "main.py"), "w") as f:
+            f.write("print('hello')\n")
+        result = verify_project(self._tmpdir, timeout=10)
+        self.assertTrue(result.success)
+        self.assertEqual(result.detection_method, "main.py")
+
+    def test_verify_failure(self):
+        from BrainDock.executor.sandbox import verify_project
+        with open(os.path.join(self._tmpdir, "main.py"), "w") as f:
+            f.write("raise Exception('boom')\n")
+        result = verify_project(self._tmpdir, timeout=10)
+        self.assertFalse(result.success)
+        self.assertIn("boom", result.error_summary + result.stderr)
+
+    def test_verify_no_entry_point(self):
+        from BrainDock.executor.sandbox import verify_project
+        result = verify_project(self._tmpdir, timeout=10)
+        self.assertTrue(result.success)  # No entry point → skip → success
+        self.assertEqual(result.detection_method, "none")
+
+    def test_verify_syntax_error(self):
+        from BrainDock.executor.sandbox import verify_project
+        with open(os.path.join(self._tmpdir, "main.py"), "w") as f:
+            f.write("def foo(\n")  # SyntaxError
+        result = verify_project(self._tmpdir, timeout=10)
+        self.assertFalse(result.success)
+
+
+class TestVerifyResult(unittest.TestCase):
+    """Test the VerifyResult model."""
+
+    def test_to_dict(self):
+        from BrainDock.executor.models import VerifyResult
+        vr = VerifyResult(success=True, command="python main.py", exit_code=0)
+        d = vr.to_dict()
+        self.assertTrue(d["success"])
+        self.assertEqual(d["command"], "python main.py")
+
+
+class TestTaskOutcomeAffectedFile(unittest.TestCase):
+    """Test the affected_file field on TaskOutcome."""
+
+    def test_affected_file_roundtrip(self):
+        from BrainDock.executor.models import TaskOutcome
+        o = TaskOutcome(step_id="s1", success=True, affected_file="calc.py")
+        d = o.to_dict()
+        self.assertEqual(d["affected_file"], "calc.py")
+        restored = TaskOutcome.from_dict(d)
+        self.assertEqual(restored.affected_file, "calc.py")
+
+
+class TestPipelineStateVerificationResults(unittest.TestCase):
+    """Test that verification_results is included in PipelineState."""
+
+    def test_verification_results_default(self):
+        state = PipelineState()
+        self.assertEqual(state.verification_results, [])
+
+    def test_verification_results_roundtrip(self):
+        state = PipelineState()
+        state.verification_results = [{"success": True, "command": "python main.py"}]
+        d = state.to_dict()
+        restored = PipelineState.from_dict(d)
+        self.assertEqual(len(restored.verification_results), 1)
+        self.assertTrue(restored.verification_results[0]["success"])
+
+
+class TestReadFileSafe(unittest.TestCase):
+    """Test the read_file_safe function."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_read_existing_file(self):
+        from BrainDock.executor.sandbox import read_file_safe
+        with open(os.path.join(self._tmpdir, "test.py"), "w") as f:
+            f.write("content\n")
+        result = read_file_safe("test.py", self._tmpdir)
+        self.assertEqual(result, "content\n")
+
+    def test_read_nonexistent_file(self):
+        from BrainDock.executor.sandbox import read_file_safe
+        result = read_file_safe("nonexistent.py", self._tmpdir)
+        self.assertIsNone(result)
+
+    def test_read_path_traversal(self):
+        from BrainDock.executor.sandbox import read_file_safe
+        result = read_file_safe("../../etc/passwd", self._tmpdir)
+        self.assertIsNone(result)
+
+
+class TestPipelineStateMarketStudies(unittest.TestCase):
+    """Test that market_studies is included in PipelineState."""
+
+    def test_market_studies_default(self):
+        state = PipelineState()
+        self.assertEqual(state.market_studies, [])
+
+    def test_market_studies_roundtrip(self):
+        state = PipelineState()
+        state.market_studies = [{"task_id": "t1", "competitors": ["Acme"]}]
+        d = state.to_dict()
+        restored = PipelineState.from_dict(d)
+        self.assertEqual(len(restored.market_studies), 1)
+        self.assertEqual(restored.market_studies[0]["task_id"], "t1")
+
+
+class TestTaskNodeTags(unittest.TestCase):
+    """Test that tags field works on TaskNode."""
+
+    def test_tags_default(self):
+        from BrainDock.task_graph.models import TaskNode
+        node = TaskNode(id="t1", title="Test", description="Desc")
+        self.assertEqual(node.tags, [])
+
+    def test_tags_roundtrip(self):
+        from BrainDock.task_graph.models import TaskNode
+        node = TaskNode(id="t1", title="Test", description="Desc", tags=["needs_market_study"])
+        d = node.to_dict()
+        self.assertEqual(d["tags"], ["needs_market_study"])
+        restored = TaskNode.from_dict(d)
+        self.assertEqual(restored.tags, ["needs_market_study"])
+
+
+class TestMarketStudyResult(unittest.TestCase):
+    """Test the MarketStudyResult model."""
+
+    def test_roundtrip(self):
+        from BrainDock.market_study.models import MarketStudyResult
+        result = MarketStudyResult(
+            task_id="t1",
+            competitors=["Acme", "Corp"],
+            recommendations=["Focus on UX"],
+            risks=["Market saturation"],
+            target_audience="Developers",
+            positioning="Best-in-class CLI tool",
+        )
+        d = result.to_dict()
+        self.assertEqual(d["task_id"], "t1")
+        self.assertEqual(d["competitors"], ["Acme", "Corp"])
+
+        restored = MarketStudyResult.from_dict(d)
+        self.assertEqual(restored.task_id, "t1")
+        self.assertEqual(restored.positioning, "Best-in-class CLI tool")
+
+    def test_to_context_string(self):
+        from BrainDock.market_study.models import MarketStudyResult
+        result = MarketStudyResult(
+            task_id="t1",
+            competitors=["Acme"],
+            target_audience="Devs",
+            positioning="Leader",
+        )
+        ctx = result.to_context_string()
+        self.assertIn("t1", ctx)
+        self.assertIn("Acme", ctx)
+        self.assertIn("Devs", ctx)
+
+
+class TestBaseAgentRetry(unittest.TestCase):
+    """Test that BaseAgent retries on transient failures."""
+
+    def test_retry_on_runtime_error(self):
+        from BrainDock.base_agent import BaseAgent, MAX_LLM_RETRIES
+        call_count = {"n": 0}
+
+        class FailOnceBackend:
+            def query(self, system_prompt, user_prompt):
+                call_count["n"] += 1
+                if call_count["n"] == 1:
+                    raise RuntimeError("Transient failure")
+                return '{"result": "ok"}'
+
+        agent = BaseAgent(llm=FailOnceBackend())
+        result = agent._llm_query_json("sys", "user")
+        self.assertEqual(result, {"result": "ok"})
+        self.assertEqual(call_count["n"], 2)
+
+    def test_persistent_failure_raises(self):
+        from BrainDock.base_agent import BaseAgent, MAX_LLM_RETRIES
+
+        class AlwaysFailBackend:
+            def query(self, system_prompt, user_prompt):
+                raise RuntimeError("Always fails")
+
+        agent = BaseAgent(llm=AlwaysFailBackend())
+        with self.assertRaises(RuntimeError):
+            agent._llm_query_json("sys", "user")
 
 
 if __name__ == "__main__":
