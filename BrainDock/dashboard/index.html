@@ -878,6 +878,10 @@
       <span class="stat-value" id="statMarketStudies" style="color:var(--yellow)">0</span>
       <span class="stat-label">Market Studies</span>
     </div>
+    <div class="stat">
+      <span class="stat-value" id="statEscalations" style="color:var(--orange)">0</span>
+      <span class="stat-label">Escalations</span>
+    </div>
   </div>
 
   <!-- Main grid: active agent + task graph + results -->
@@ -1064,7 +1068,14 @@ async function resumeRun(title) {
       throw new Error('Server returned non-JSON response. Check that BrainDock dashboard is running on this port.');
     }
     const data = await r.json();
-    if (data.error) alert(data.error);
+    if (data.error) {
+      alert(data.error);
+    } else {
+      // Reset cursors so full restored history is fetched
+      activityCursor = 0;
+      chatCursor = 0;
+      logsCursor = 0;
+    }
   } catch (e) { alert('Failed: ' + e.message); }
 }
 
@@ -1251,6 +1262,7 @@ function renderStats(state) {
   document.getElementById('statReflections').textContent = (state.reflections || []).length;
   document.getElementById('statDebates').textContent = (state.debates || []).length;
   document.getElementById('statMarketStudies').textContent = (state.market_studies || []).length;
+  document.getElementById('statEscalations').textContent = (state.escalations || []).length;
 }
 
 function renderActiveAgent(state) {
@@ -1310,6 +1322,8 @@ function renderTaskGraph(state) {
   body.innerHTML = html;
 }
 
+let _lastResultsFingerprint = '';
+
 function renderResults(state) {
   const body = document.getElementById('resultsBody');
   const cards = [];
@@ -1328,16 +1342,43 @@ function renderResults(state) {
   (state.debates || []).forEach((d, i) => { cards.push(makeCard('Debate '+(i+1), 'tag-purple', '<pre>'+esc(JSON.stringify(d,null,2))+'</pre>')); });
   (state.market_studies || []).forEach((m, i) => {
     const title = 'Market Study: ' + esc(m.task_id || 'Study '+(i+1));
-    let body = '';
-    if (m.target_audience) body += '<div><strong>Audience:</strong> '+esc(m.target_audience)+'</div>';
-    if (m.positioning) body += '<div><strong>Positioning:</strong> '+esc(m.positioning)+'</div>';
-    if (m.competitors && m.competitors.length) body += '<div><strong>Competitors:</strong> '+m.competitors.map(c=>esc(c)).join(', ')+'</div>';
-    if (m.recommendations && m.recommendations.length) body += '<div><strong>Recommendations:</strong><ul>'+m.recommendations.map(r=>'<li>'+esc(r)+'</li>').join('')+'</ul></div>';
-    if (m.risks && m.risks.length) body += '<div><strong>Risks:</strong><ul>'+m.risks.map(r=>'<li>'+esc(r)+'</li>').join('')+'</ul></div>';
-    cards.push(makeCard(title, 'tag-yellow', body || '<pre>'+esc(JSON.stringify(m,null,2))+'</pre>'));
+    let mbody = '';
+    if (m.target_audience) mbody += '<div><strong>Audience:</strong> '+esc(m.target_audience)+'</div>';
+    if (m.positioning) mbody += '<div><strong>Positioning:</strong> '+esc(m.positioning)+'</div>';
+    if (m.competitors && m.competitors.length) mbody += '<div><strong>Competitors:</strong> '+m.competitors.map(c=>esc(c)).join(', ')+'</div>';
+    if (m.recommendations && m.recommendations.length) mbody += '<div><strong>Recommendations:</strong><ul>'+m.recommendations.map(r=>'<li>'+esc(r)+'</li>').join('')+'</ul></div>';
+    if (m.risks && m.risks.length) mbody += '<div><strong>Risks:</strong><ul>'+m.risks.map(r=>'<li>'+esc(r)+'</li>').join('')+'</ul></div>';
+    cards.push(makeCard(title, 'tag-yellow', mbody || '<pre>'+esc(JSON.stringify(m,null,2))+'</pre>'));
+  });
+  (state.escalations || []).forEach((e, i) => {
+    const title = 'Escalation: ' + esc(e.task_id || 'Escalation '+(i+1));
+    let ebody = '<div><strong>Trigger:</strong> ' + esc(e.trigger || '') + '</div>';
+    ebody += '<div><strong>Reason:</strong> ' + esc(e.reason || '') + '</div>';
+    ebody += '<div><strong>Action:</strong> ' + esc(e.action || '') + '</div>';
+    if (e.hint) ebody += '<div><strong>Hint:</strong> ' + esc(e.hint) + '</div>';
+    cards.push(makeCard(title, 'tag-yellow', ebody));
   });
   (state.learned_skills || []).forEach((s, i) => { cards.push(makeCard('Skill: '+esc(s.name||'Skill '+(i+1)), 'tag-green', '<div>'+esc(s.description||'')+'</div>'+(s.pattern?'<pre>'+esc(s.pattern)+'</pre>':''))); });
-  body.innerHTML = cards.length ? cards.join('') : '<div class="empty-state">Results will appear as the pipeline runs</div>';
+
+  // Only re-render if content changed — preserves open/closed card state
+  const newHtml = cards.length ? cards.join('') : '<div class="empty-state">Results will appear as the pipeline runs</div>';
+  const fingerprint = cards.length.toString();
+  if (fingerprint !== _lastResultsFingerprint) {
+    // Save open states
+    const openIndices = new Set();
+    body.querySelectorAll('.result-card.open').forEach(el => {
+      const idx = Array.from(body.children).indexOf(el);
+      if (idx >= 0) openIndices.add(idx);
+    });
+
+    body.innerHTML = newHtml;
+    _lastResultsFingerprint = fingerprint;
+
+    // Restore open states
+    openIndices.forEach(idx => {
+      if (body.children[idx]) body.children[idx].classList.add('open');
+    });
+  }
 }
 
 function makeCard(title, tagClass, content) {

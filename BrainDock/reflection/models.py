@@ -53,6 +53,8 @@ class ReflectionResult:
     summary: str = ""
     should_retry: bool = False
     modified_plan: dict = field(default_factory=dict)
+    needs_human: bool = False
+    escalation_reason: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -61,6 +63,8 @@ class ReflectionResult:
             "summary": self.summary,
             "should_retry": self.should_retry,
             "modified_plan": self.modified_plan,
+            "needs_human": self.needs_human,
+            "escalation_reason": self.escalation_reason,
         }
 
     @classmethod
@@ -71,4 +75,6 @@ class ReflectionResult:
             summary=data.get("summary", ""),
             should_retry=data.get("should_retry", False),
             modified_plan=data.get("modified_plan", {}),
+            needs_human=data.get("needs_human", False),
+            escalation_reason=data.get("escalation_reason", ""),
         )

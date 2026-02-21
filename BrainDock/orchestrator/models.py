@@ -31,6 +31,8 @@ class RunConfig:
     max_entropy: float = 0.7
     skip_execution: bool = False
     skip_skill_learning: bool = False
+    enable_human_escalation: bool = True
+    escalation_token_budget: int = 50000
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -46,6 +48,8 @@ class RunConfig:
             max_entropy=data.get("max_entropy", 0.7),
             skip_execution=data.get("skip_execution", False),
             skip_skill_learning=data.get("skip_skill_learning", False),
+            enable_human_escalation=data.get("enable_human_escalation", True),
+            escalation_token_budget=data.get("escalation_token_budget", 50000),
         )
 
 
@@ -75,6 +79,7 @@ class PipelineState:
     completed_tasks: list[str] = field(default_factory=list)
     failed_tasks: list[str] = field(default_factory=list)
     verification_results: list[dict] = field(default_factory=list)
+    escalations: list[dict] = field(default_factory=list)
     error: str = ""
 
     def to_dict(self) -> dict:
@@ -88,7 +93,7 @@ class PipelineState:
             "current_mode", "spec", "task_graph", "plans",
             "execution_results", "learned_skills", "reflections",
             "debates", "market_studies", "completed_tasks", "failed_tasks",
-            "verification_results", "error",
+            "verification_results", "escalations", "error",
         ):
             if key in data:
                 setattr(state, key, data[key])

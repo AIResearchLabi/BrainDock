@@ -523,5 +523,121 @@ class TestBaseAgentRetry(unittest.TestCase):
             agent._llm_query_json("sys", "user")
 
 
+class TestParseEscalationResponse(unittest.TestCase):
+    """Test the _parse_escalation_response static method."""
+
+    def test_skip(self):
+        action, hint = OrchestratorAgent._parse_escalation_response(
+            {"escalation_action": "skip"}, "t1"
+        )
+        self.assertEqual(action, "skip")
+        self.assertEqual(hint, "")
+
+    def test_retry_with_hint(self):
+        action, hint = OrchestratorAgent._parse_escalation_response(
+            {"escalation_action": "retry", "escalation_hint": "Try using OAuth2"}, "t1"
+        )
+        self.assertEqual(action, "retry")
+        self.assertEqual(hint, "Try using OAuth2")
+
+    def test_abort(self):
+        action, hint = OrchestratorAgent._parse_escalation_response(
+            {"escalation_action": "abort"}, "t1"
+        )
+        self.assertEqual(action, "abort")
+
+    def test_invalid_action_defaults_to_skip(self):
+        action, hint = OrchestratorAgent._parse_escalation_response(
+            {"escalation_action": "invalid_value"}, "t1"
+        )
+        self.assertEqual(action, "skip")
+
+    def test_empty_answers_defaults_to_skip(self):
+        action, hint = OrchestratorAgent._parse_escalation_response({}, "t1")
+        self.assertEqual(action, "skip")
+        self.assertEqual(hint, "")
+
+    def test_whitespace_stripping(self):
+        action, hint = OrchestratorAgent._parse_escalation_response(
+            {"escalation_action": "  retry  ", "escalation_hint": "  some hint  "}, "t1"
+        )
+        self.assertEqual(action, "retry")
+        self.assertEqual(hint, "some hint")
+
+
+class TestRunConfigEscalation(unittest.TestCase):
+    """Test the new escalation fields on RunConfig."""
+
+    def test_defaults(self):
+        config = RunConfig()
+        self.assertTrue(config.enable_human_escalation)
+        self.assertEqual(config.escalation_token_budget, 50000)
+
+    def test_roundtrip(self):
+        config = RunConfig(enable_human_escalation=False, escalation_token_budget=10000)
+        d = config.to_dict()
+        restored = RunConfig.from_dict(d)
+        self.assertFalse(restored.enable_human_escalation)
+        self.assertEqual(restored.escalation_token_budget, 10000)
+
+    def test_from_dict_missing_fields(self):
+        restored = RunConfig.from_dict({"output_dir": "/tmp"})
+        self.assertTrue(restored.enable_human_escalation)
+        self.assertEqual(restored.escalation_token_budget, 50000)
+
+
+class TestPipelineStateEscalations(unittest.TestCase):
+    """Test the escalations field on PipelineState."""
+
+    def test_default(self):
+        state = PipelineState()
+        self.assertEqual(state.escalations, [])
+
+    def test_roundtrip(self):
+        state = PipelineState()
+        state.escalations = [
+            {"task_id": "t1", "trigger": "needs_human", "reason": "Auth required", "action": "skip", "hint": ""},
+            {"task_id": "t2", "trigger": "reflection_exhausted", "reason": "Retries used up", "action": "retry", "hint": "Try X"},
+        ]
+        d = state.to_dict()
+        restored = PipelineState.from_dict(d)
+        self.assertEqual(len(restored.escalations), 2)
+        self.assertEqual(restored.escalations[0]["trigger"], "needs_human")
+        self.assertEqual(restored.escalations[1]["action"], "retry")
+
+
+class TestReflectionResultNeedsHuman(unittest.TestCase):
+    """Test the needs_human field on ReflectionResult."""
+
+    def test_defaults(self):
+        from BrainDock.reflection.models import ReflectionResult
+        result = ReflectionResult()
+        self.assertFalse(result.needs_human)
+        self.assertEqual(result.escalation_reason, "")
+
+    def test_roundtrip(self):
+        from BrainDock.reflection.models import ReflectionResult
+        result = ReflectionResult(
+            needs_human=True,
+            escalation_reason="Requires GitHub OAuth token",
+            summary="Auth needed",
+            should_retry=False,
+        )
+        d = result.to_dict()
+        self.assertTrue(d["needs_human"])
+        self.assertEqual(d["escalation_reason"], "Requires GitHub OAuth token")
+
+        restored = ReflectionResult.from_dict(d)
+        self.assertTrue(restored.needs_human)
+        self.assertEqual(restored.escalation_reason, "Requires GitHub OAuth token")
+        self.assertFalse(restored.should_retry)
+
+    def test_from_dict_missing_fields(self):
+        from BrainDock.reflection.models import ReflectionResult
+        restored = ReflectionResult.from_dict({"summary": "test"})
+        self.assertFalse(restored.needs_human)
+        self.assertEqual(restored.escalation_reason, "")
+
+
 if __name__ == "__main__":
     unittest.main()

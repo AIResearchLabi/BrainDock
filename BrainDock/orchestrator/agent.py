@@ -79,6 +79,63 @@ class OrchestratorAgent:
         self.llm = llm or ClaudeCLIBackend()
         self.config = config or RunConfig()
 
+    @staticmethod
+    def _escalate_to_human(ask_fn, task_node, reason, context, reflection_result=None):
+        """Present an escalation question to the human via ask_fn.
+
+        Creates Questions with Skip/Retry/Abort options plus a hint text field,
+        then calls ask_fn() which blocks the pipeline thread (same mechanism as
+        spec questions).
+
+        Returns:
+            dict of answers from the human.
+        """
+        summary = f"Task '{task_node.id}' needs human help: {reason}"
+        if reflection_result and reflection_result.escalation_reason:
+            summary += f"\n\nDetails: {reflection_result.escalation_reason}"
+        if context:
+            # Truncate context to keep the question manageable
+            ctx_preview = context[:300] + "..." if len(context) > 300 else context
+            summary += f"\n\nContext: {ctx_preview}"
+
+        questions = [
+            Question(
+                id="escalation_action",
+                question=summary,
+                why=reason,
+                options=["skip", "retry", "abort"],
+            ),
+            Question(
+                id="escalation_hint",
+                question="If retrying, provide a hint or guidance (optional):",
+                why="Your input will be injected as extra context for the retry attempt.",
+                options=[],
+            ),
+        ]
+        decisions = [
+            Decision(
+                id="escalation_trigger",
+                topic="Escalation trigger",
+                decision=reason,
+            ),
+        ]
+        answers = ask_fn(questions, decisions, summary)
+        return answers
+
+    @staticmethod
+    def _parse_escalation_response(answers, task_id):
+        """Parse the human's escalation response.
+
+        Returns:
+            tuple of (action, hint) where action is "skip"|"retry"|"abort"
+            and hint is the optional guidance text.
+        """
+        action = answers.get("escalation_action", "skip").strip().lower()
+        if action not in ("skip", "retry", "abort"):
+            action = "skip"
+        hint = answers.get("escalation_hint", "").strip()
+        return action, hint
+
     def _save_state(self, state: PipelineState, output_dir: str, on_state: Callable | None = None) -> None:
         """Write pipeline state to JSON for dashboard consumption."""
         state_path = os.path.join(output_dir, "pipeline_state.json")
@@ -431,6 +488,19 @@ class OrchestratorAgent:
                     # ── Mode 7: Reflection (if execution failed) ──────
                     if exec_gate.action == "reflect":
                         current_plan = plan_dict
+                        task_token_count = 0
+                        _token_hook_installed = False
+                        _original_on_log = None
+                        if logging_backend:
+                            _original_on_log = logging_backend._on_log
+                            _token_hook_installed = True
+                            def _token_tracking_hook(entry, _orig=_original_on_log):
+                                nonlocal task_token_count
+                                task_token_count += entry.get("est_input_tokens", 0) + entry.get("est_output_tokens", 0)
+                                if _orig:
+                                    _orig(entry)
+                            logging_backend._on_log = _token_tracking_hook
+
                         for retry_num in range(self.config.max_reflection_iterations):
                             ref_gate = controller.check_reflection_gate()
                             if not ref_gate.passed:
@@ -471,11 +541,74 @@ class OrchestratorAgent:
                             if analysis:
                                 _emit(on_activity, "reflection", "output", analysis[:500], "info")
 
+                            # ── Escalation Point 1: Human-required cause ──
+                            if ref_result.needs_human and self.config.enable_human_escalation:
+                                _emit(on_activity, "orchestrator", "escalation",
+                                      f"Task {task_node.id}: needs human — {ref_result.escalation_reason}", "warning")
+                                esc_answers = self._escalate_to_human(
+                                    ask_fn, task_node,
+                                    reason=f"Reflection identified human-required cause: {ref_result.escalation_reason}",
+                                    context=reflect_context,
+                                    reflection_result=ref_result,
+                                )
+                                esc_action, esc_hint = self._parse_escalation_response(esc_answers, task_node.id)
+                                state.escalations.append({
+                                    "task_id": task_node.id,
+                                    "trigger": "needs_human",
+                                    "reason": ref_result.escalation_reason,
+                                    "action": esc_action,
+                                    "hint": esc_hint,
+                                })
+                                self._save_state(state, output_dir, on_state)
+                                if esc_action == "abort":
+                                    _emit(on_activity, "orchestrator", "abort", "Human chose to abort pipeline", "error")
+                                    return state
+                                elif esc_action == "retry" and esc_hint:
+                                    reflect_context += f"\n\nHuman guidance: {esc_hint}"
+                                    continue
+                                else:
+                                    # skip
+                                    break
+
                             if not ref_result.should_retry or not ref_result.modified_plan:
                                 break
 
                             # Retry execution with modified plan
                             current_plan = ref_result.modified_plan
+
+                            # ── Escalation Point 3: Token budget exceeded ──
+                            if (self.config.enable_human_escalation
+                                    and task_token_count > self.config.escalation_token_budget):
+                                _emit(on_activity, "orchestrator", "escalation",
+                                      f"Task {task_node.id}: token budget exceeded ({task_token_count} tokens)", "warning")
+                                esc_answers = self._escalate_to_human(
+                                    ask_fn, task_node,
+                                    reason=f"Token budget exceeded ({task_token_count} tokens used, budget: {self.config.escalation_token_budget})",
+                                    context=reflect_context,
+                                )
+                                esc_action, esc_hint = self._parse_escalation_response(esc_answers, task_node.id)
+                                state.escalations.append({
+                                    "task_id": task_node.id,
+                                    "trigger": "token_budget",
+                                    "reason": f"Token budget exceeded: {task_token_count}/{self.config.escalation_token_budget}",
+                                    "action": esc_action,
+                                    "hint": esc_hint,
+                                })
+                                self._save_state(state, output_dir, on_state)
+                                if esc_action == "abort":
+                                    _emit(on_activity, "orchestrator", "abort", "Human chose to abort pipeline", "error")
+                                    if _token_hook_installed:
+                                        logging_backend._on_log = _original_on_log
+                                    return state
+                                elif esc_action == "skip":
+                                    break
+                                elif esc_action == "retry" and esc_hint:
+                                    project_context = _build_project_context(
+                                        state.spec, project_dir,
+                                        completed_tasks=state.completed_tasks,
+                                    )
+                                    project_context += f"\n\nHuman guidance: {esc_hint}"
+
                             _set_agent("executor")
                             _emit(on_activity, "executor", "mode_change",
                                   f"Retrying with modified plan (attempt {retry_num + 1})")
@@ -512,6 +645,56 @@ class OrchestratorAgent:
                                     _emit(on_activity, "executor", "failed", "Retry execution failed", "error")
                         else:
                             _emit(on_activity, "reflection", "exhausted", "Max reflection iterations reached", "warning")
+
+                            # ── Escalation Point 2: Reflection exhausted ──
+                            if self.config.enable_human_escalation:
+                                _emit(on_activity, "orchestrator", "escalation",
+                                      f"Task {task_node.id}: all reflection retries exhausted", "warning")
+                                esc_answers = self._escalate_to_human(
+                                    ask_fn, task_node,
+                                    reason="All reflection retries exhausted without success",
+                                    context=project_context,
+                                )
+                                esc_action, esc_hint = self._parse_escalation_response(esc_answers, task_node.id)
+                                state.escalations.append({
+                                    "task_id": task_node.id,
+                                    "trigger": "reflection_exhausted",
+                                    "reason": "All reflection retries exhausted",
+                                    "action": esc_action,
+                                    "hint": esc_hint,
+                                })
+                                self._save_state(state, output_dir, on_state)
+                                if esc_action == "abort":
+                                    _emit(on_activity, "orchestrator", "abort", "Human chose to abort pipeline", "error")
+                                    if _token_hook_installed:
+                                        logging_backend._on_log = _original_on_log
+                                    return state
+                                elif esc_action == "retry" and esc_hint:
+                                    # One more attempt with human hint
+                                    _emit(on_activity, "executor", "mode_change",
+                                          f"Retrying with human guidance for task {task_node.id}")
+                                    hint_context = _build_project_context(
+                                        state.spec, project_dir,
+                                        completed_tasks=state.completed_tasks,
+                                    )
+                                    hint_context += f"\n\nHuman guidance: {esc_hint}"
+                                    retry_result = executor.execute(
+                                        current_plan,
+                                        project_dir=project_dir,
+                                        project_file_context=hint_context,
+                                    )
+                                    state.execution_results.append(retry_result.to_dict())
+                                    verify_result = verify_project(project_dir, timeout=10)
+                                    state.verification_results.append(verify_result.to_dict())
+                                    if retry_result.success and verify_result.success:
+                                        exec_result = retry_result
+                                        exec_dict = exec_result.to_dict()
+                                        _emit(on_activity, "executor", "completed", "Human-guided retry succeeded", "success")
+                                    # else: falls through to normal failure handling
+
+                        # Restore original logging hook
+                        if _token_hook_installed:
+                            logging_backend._on_log = _original_on_log
 
                     # ── Mode 6: Skill Learning ────────────────────────
                     if exec_result.success and not self.config.skip_skill_learning:
