@@ -6,6 +6,7 @@ import json
 
 from BrainDock.base_agent import BaseAgent
 from BrainDock.llm import LLMBackend
+from BrainDock.preambles import build_system_prompt, DEV_OPS, BUSINESS_OPS
 from .models import TaskGraph
 from .prompts import SYSTEM_PROMPT, DECOMPOSE_PROMPT
 
@@ -20,6 +21,7 @@ class TaskGraphAgent(BaseAgent):
 
     def __init__(self, llm: LLMBackend | None = None):
         super().__init__(llm=llm)
+        self._sys_prompt = build_system_prompt(SYSTEM_PROMPT, DEV_OPS, BUSINESS_OPS)
 
     def decompose(self, spec: dict) -> TaskGraph:
         """Decompose a project specification into a task graph.
@@ -31,5 +33,5 @@ class TaskGraphAgent(BaseAgent):
             A TaskGraph with ordered, dependency-linked tasks.
         """
         prompt = DECOMPOSE_PROMPT.format(spec_json=json.dumps(spec, indent=2))
-        data = self._llm_query_json(SYSTEM_PROMPT, prompt)
+        data = self._llm_query_json(self._sys_prompt, prompt)
         return TaskGraph.from_dict(data)

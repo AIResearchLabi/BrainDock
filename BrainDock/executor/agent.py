@@ -6,6 +6,7 @@ import json
 
 from BrainDock.base_agent import BaseAgent
 from BrainDock.llm import LLMBackend
+from BrainDock.preambles import build_system_prompt, EXEC_OPS, DEV_OPS
 from .models import TaskOutcome, StopCondition, ExecutionResult
 from .prompts import SYSTEM_PROMPT, EXECUTE_STEP_PROMPT, VERIFY_STEP_PROMPT
 from .sandbox import run_sandboxed, write_file_safe, read_file_safe
@@ -26,6 +27,7 @@ class ExecutorAgent(BaseAgent):
     ):
         super().__init__(llm=llm)
         self.stop_condition = stop_condition or StopCondition()
+        self._sys_prompt = build_system_prompt(SYSTEM_PROMPT, EXEC_OPS, DEV_OPS)
 
     def execute_step(
         self,
@@ -76,7 +78,7 @@ class ExecutorAgent(BaseAgent):
             edit_file_context=edit_file_context,
         )
 
-        data = self._llm_query_json(SYSTEM_PROMPT, prompt)
+        data = self._llm_query_json(self._sys_prompt, prompt)
         action_type = data.get("action_type", "")
         file_path = data.get("file_path", "")
         content = data.get("content", "")

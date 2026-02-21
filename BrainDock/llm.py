@@ -28,7 +28,7 @@ class ClaudeCLIBackend:
     def query(self, system_prompt: str, user_prompt: str) -> str:
         full_prompt = f"{system_prompt}\n\n{user_prompt}"
 
-        cmd = ["claude", "-p"]
+        cmd = ["claude", "-p", "--dangerously-skip-permissions"]
         if self.model:
             cmd.extend(["--model", self.model])
 

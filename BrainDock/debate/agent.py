@@ -6,6 +6,7 @@ import json
 
 from BrainDock.base_agent import BaseAgent
 from BrainDock.llm import LLMBackend
+from BrainDock.preambles import build_system_prompt, DEV_OPS, BUSINESS_OPS
 from .models import DebatePlan, Critique, DebateOutcome
 from .prompts import (
     SYSTEM_PROMPT,
@@ -35,6 +36,7 @@ class DebateAgent(BaseAgent):
     ):
         super().__init__(llm=llm)
         self.max_rounds = max_rounds
+        self._sys_prompt = build_system_prompt(SYSTEM_PROMPT, DEV_OPS, BUSINESS_OPS)
 
     def propose(self, plan: dict, context: str = "") -> list[DebatePlan]:
         """Generate alternative proposals for a plan.
@@ -50,7 +52,7 @@ class DebateAgent(BaseAgent):
             plan_json=json.dumps(plan, indent=2),
             context=context or "(no additional context)",
         )
-        data = self._llm_query_json(SYSTEM_PROMPT, prompt)
+        data = self._llm_query_json(self._sys_prompt, prompt)
         return [DebatePlan.from_dict(p) for p in data.get("proposals", [])]
 
     def critique(
@@ -75,7 +77,7 @@ class DebateAgent(BaseAgent):
             round=round_num,
             max_rounds=self.max_rounds,
         )
-        data = self._llm_query_json(SYSTEM_PROMPT, prompt)
+        data = self._llm_query_json(self._sys_prompt, prompt)
         critiques = [Critique.from_dict(c) for c in data.get("critiques", [])]
         converged = data.get("converged", False)
         winning = data.get("winning_approach", "")
@@ -100,7 +102,7 @@ class DebateAgent(BaseAgent):
             winning_approach=winning_approach or "No clear winner — synthesize best ideas",
             plan_json=json.dumps(plan, indent=2),
         )
-        data = self._llm_query_json(SYSTEM_PROMPT, prompt)
+        data = self._llm_query_json(self._sys_prompt, prompt)
         return data.get("improved_plan", {}), data.get("synthesis", "")
 
     def debate(self, plan: dict, context: str = "") -> DebateOutcome:

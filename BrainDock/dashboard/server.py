@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
 import traceback
@@ -17,6 +18,8 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
 from .runner import PipelineRunner
+
+logger = logging.getLogger("braindock.server")
 
 
 class DashboardHandler(SimpleHTTPRequestHandler):
@@ -163,10 +166,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             return
         if not title:
             title = problem[:60]
+        logger.info("API /start: title=%r problem=%r", title, problem[:80])
         ok = self.runner.start(title, problem)
         if ok:
             self._json_response({"ok": True, "title": title})
         else:
+            logger.warning("API /start: pipeline already running")
             self._json_response({"error": "Pipeline already running"}, status=409)
 
     def _api_answers(self, body: dict):
@@ -190,10 +195,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if not title:
             self._json_response({"error": "title is required"}, status=400)
             return
+        logger.info("API /resume: title=%r", title)
         ok = self.runner.resume(title)
         if ok:
             self._json_response({"ok": True, "title": title})
         else:
+            logger.warning("API /resume: could not resume %r", title)
             self._json_response({"error": f"Could not resume '{title}'"}, status=404)
 
     # ── Helpers ───────────────────────────────────────────────────
@@ -278,12 +285,29 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         super().log_message(format, *args)
 
 
+def _setup_logging(verbose: bool = True) -> None:
+    """Configure logging for BrainDock dashboard.
+
+    Args:
+        verbose: If True (default), log at INFO level. If False, only WARNINGS+.
+    """
+    level = logging.INFO if verbose else logging.WARNING
+    fmt = "%(asctime)s [%(name)s] %(levelname)s: %(message)s"
+    datefmt = "%H:%M:%S"
+    logging.basicConfig(level=level, format=fmt, datefmt=datefmt, stream=sys.stderr)
+    # Quiet down noisy loggers
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+
+
 def run_server(
     output_dir: str = "output",
     port: int = 3000,
     runner: PipelineRunner | None = None,
+    verbose: bool = True,
 ) -> None:
     """Start the dashboard HTTP server."""
+    _setup_logging(verbose)
+
     dashboard_dir = str(Path(__file__).parent)
     output_dir = os.path.abspath(output_dir)
     Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -299,8 +323,12 @@ def run_server(
     )
 
     server = ThreadingHTTPServer(("0.0.0.0", port), handler)
+    logger.info("BrainDock Dashboard running at http://localhost:%d", port)
+    logger.info("Serving output from: %s", output_dir)
+    logger.info("Logging: %s", "verbose" if verbose else "quiet")
     print(f"BrainDock Dashboard running at http://localhost:{port}")
     print(f"  Serving output from: {output_dir}")
+    print(f"  Logging: {'verbose (use --no-log to disable)' if verbose else 'quiet'}")
     print(f"  Press Ctrl+C to stop")
     print()
 
@@ -326,5 +354,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=3000,
         help="Port to serve on (default: 3000)",
+    )
+    parser.add_argument(
+        "--no-log",
+        action="store_true",
+        default=False,
+        help="Disable verbose terminal logging (enabled by default)",
     )
     return parser.parse_args(argv)

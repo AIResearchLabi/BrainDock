@@ -6,6 +6,7 @@ import json
 
 from BrainDock.base_agent import BaseAgent
 from BrainDock.llm import LLMBackend
+from BrainDock.preambles import build_system_prompt, DEV_OPS
 from .models import Skill, SkillBank
 from .prompts import SYSTEM_PROMPT, EXTRACT_SKILL_PROMPT, MATCH_SKILLS_PROMPT
 
@@ -21,6 +22,7 @@ class SkillLearningAgent(BaseAgent):
 
     def __init__(self, llm: LLMBackend | None = None):
         super().__init__(llm=llm)
+        self._sys_prompt = build_system_prompt(SYSTEM_PROMPT, DEV_OPS)
 
     def extract_skill(
         self,
@@ -34,7 +36,7 @@ class SkillLearningAgent(BaseAgent):
             solution_code=solution_code,
             outcome=outcome,
         )
-        data = self._llm_query_json(SYSTEM_PROMPT, prompt)
+        data = self._llm_query_json(self._sys_prompt, prompt)
         skill = Skill.from_dict(data)
         skill.source_task = task_description[:200]
         return skill
@@ -61,5 +63,5 @@ class SkillLearningAgent(BaseAgent):
             task_description=task_description,
             skills_json=skills_json,
         )
-        data = self._llm_query_json(SYSTEM_PROMPT, prompt)
+        data = self._llm_query_json(self._sys_prompt, prompt)
         return data.get("matches", [])

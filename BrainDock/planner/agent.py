@@ -6,6 +6,7 @@ import json
 
 from BrainDock.base_agent import BaseAgent
 from BrainDock.llm import LLMBackend
+from BrainDock.preambles import build_system_prompt, DEV_OPS, EXEC_OPS
 from .models import ActionPlan
 from .prompts import SYSTEM_PROMPT, PLAN_TASK_PROMPT
 
@@ -30,6 +31,7 @@ class PlannerAgent(BaseAgent):
     ):
         super().__init__(llm=llm)
         self.entropy_threshold = entropy_threshold
+        self._sys_prompt = build_system_prompt(SYSTEM_PROMPT, DEV_OPS, EXEC_OPS)
 
     def plan_task(
         self,
@@ -62,7 +64,7 @@ class PlannerAgent(BaseAgent):
             task_id=task.get("id", ""),
             task_title=task.get("title", ""),
         )
-        data = self._llm_query_json(SYSTEM_PROMPT, prompt)
+        data = self._llm_query_json(self._sys_prompt, prompt)
         return ActionPlan.from_dict(data)
 
     def needs_debate(self, plan: ActionPlan) -> bool:

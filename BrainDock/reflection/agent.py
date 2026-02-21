@@ -6,6 +6,7 @@ import json
 
 from BrainDock.base_agent import BaseAgent
 from BrainDock.llm import LLMBackend
+from BrainDock.preambles import build_system_prompt, EXEC_OPS
 from .models import ReflectionResult
 from .prompts import SYSTEM_PROMPT, REFLECT_PROMPT
 
@@ -30,6 +31,7 @@ class ReflectionAgent(BaseAgent):
         super().__init__(llm=llm)
         self.max_iterations = max_iterations
         self._iteration = 0
+        self._sys_prompt = build_system_prompt(SYSTEM_PROMPT, EXEC_OPS)
 
     def reflect(
         self,
@@ -65,7 +67,7 @@ class ReflectionAgent(BaseAgent):
             iteration=self._iteration,
             max_iterations=self.max_iterations,
         )
-        data = self._llm_query_json(SYSTEM_PROMPT, prompt)
+        data = self._llm_query_json(self._sys_prompt, prompt)
         return ReflectionResult.from_dict(data)
 
     @property

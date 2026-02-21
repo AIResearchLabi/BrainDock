@@ -2,17 +2,31 @@
 
 Bridges the synchronous blocking orchestrator with the async web server
 using threading primitives. All access to shared state is thread-safe.
+
+Chat, activity, and LLM log history is persisted to disk alongside
+pipeline_state.json so that resumed runs restore their full history.
 """
 
 from __future__ import annotations
 
+import json
+import logging
+import os
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 from BrainDock.orchestrator.agent import OrchestratorAgent
-from BrainDock.orchestrator.models import PipelineState, RunConfig
+from BrainDock.orchestrator.models import PipelineState, RunConfig, slugify
 from BrainDock.spec_agent.models import Question, Decision
+
+logger = logging.getLogger("braindock.runner")
+
+# Filenames for persisted history (stored next to pipeline_state.json)
+_CHAT_FILE = "dashboard_chat.json"
+_ACTIVITIES_FILE = "dashboard_activities.json"
+_LLM_LOGS_FILE = "dashboard_llm_logs.json"
 
 
 class PipelineRunner:
@@ -25,6 +39,9 @@ class PipelineRunner:
         self._running = False
         self._error: str = ""
         self._thread: threading.Thread | None = None
+
+        # Per-run output directory (set on start/resume for persistence)
+        self._run_dir: str | None = None
 
         # Activity log: list of {ts, agent, action, detail, status}
         self._activities: list[dict] = []
@@ -42,6 +59,63 @@ class PipelineRunner:
         self._answers: dict[str, str] = {}
         self._answer_event = threading.Event()
 
+    # ── Persistence helpers ────────────────────────────────────────
+
+    def _persist_chat(self) -> None:
+        """Write chat history to disk (must hold self._lock)."""
+        if not self._run_dir:
+            return
+        path = os.path.join(self._run_dir, _CHAT_FILE)
+        try:
+            with open(path, "w") as f:
+                json.dump(self._chat, f, default=str)
+        except OSError as e:
+            logger.warning("Failed to persist chat: %s", e)
+
+    def _persist_activities(self) -> None:
+        """Write activity log to disk (must hold self._lock)."""
+        if not self._run_dir:
+            return
+        path = os.path.join(self._run_dir, _ACTIVITIES_FILE)
+        try:
+            with open(path, "w") as f:
+                json.dump(self._activities, f, default=str)
+        except OSError as e:
+            logger.warning("Failed to persist activities: %s", e)
+
+    def _persist_llm_logs(self) -> None:
+        """Write LLM logs to disk (must hold self._lock)."""
+        if not self._run_dir:
+            return
+        path = os.path.join(self._run_dir, _LLM_LOGS_FILE)
+        try:
+            with open(path, "w") as f:
+                json.dump(self._llm_logs, f, default=str)
+        except OSError as e:
+            logger.warning("Failed to persist LLM logs: %s", e)
+
+    def _load_history(self, run_dir: str) -> None:
+        """Load persisted chat, activities, and LLM logs from a run directory."""
+        for attr, filename in [
+            ("_chat", _CHAT_FILE),
+            ("_activities", _ACTIVITIES_FILE),
+            ("_llm_logs", _LLM_LOGS_FILE),
+        ]:
+            path = os.path.join(run_dir, filename)
+            if os.path.isfile(path):
+                try:
+                    with open(path) as f:
+                        data = json.load(f)
+                    if isinstance(data, list):
+                        setattr(self, attr, data)
+                        logger.info("Loaded %d %s entries from %s", len(data), attr, filename)
+                    else:
+                        logger.warning("Unexpected format in %s, ignoring", filename)
+                except (json.JSONDecodeError, OSError) as e:
+                    logger.warning("Failed to load %s: %s", filename, e)
+            else:
+                logger.debug("No %s found in %s", filename, run_dir)
+
     # ── Start / Resume ────────────────────────────────────────────
 
     def start(self, title: str, problem: str) -> bool:
@@ -55,6 +129,13 @@ class PipelineRunner:
             self._pending_questions = None
             self._answer_event.clear()
 
+        # Resolve and store the run directory
+        slug = slugify(title)
+        run_dir = os.path.join(self.output_dir, slug)
+        Path(run_dir).mkdir(parents=True, exist_ok=True)
+        self._run_dir = run_dir
+        logger.info("Starting pipeline: title=%r, run_dir=%s", title, run_dir)
+
         self._thread = threading.Thread(
             target=self._run_pipeline,
             args=(title, problem),
@@ -65,21 +146,33 @@ class PipelineRunner:
         return True
 
     def resume(self, title: str) -> bool:
-        """Resume an existing run by title."""
-        import json
-        import os
-        from BrainDock.orchestrator.models import slugify
-
+        """Resume an existing run by title, restoring chat/activity/log history."""
         slug = slugify(title)
-        state_path = os.path.join(self.output_dir, slug, "pipeline_state.json")
+        run_dir = os.path.join(self.output_dir, slug)
+        state_path = os.path.join(run_dir, "pipeline_state.json")
         if not os.path.isfile(state_path):
+            logger.warning("Cannot resume %r: %s not found", title, state_path)
             return False
 
-        with open(state_path) as f:
-            data = json.load(f)
+        try:
+            with open(state_path) as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            logger.error("Cannot resume %r: failed to read state: %s", title, e)
+            return False
+
         problem = data.get("problem", "")
         if not problem:
+            logger.warning("Cannot resume %r: no problem statement in state", title)
             return False
+
+        # Load old history BEFORE starting (so it's available immediately)
+        logger.info("Resuming pipeline: title=%r, run_dir=%s", title, run_dir)
+        with self._lock:
+            self._chat = []
+            self._activities = []
+            self._llm_logs = []
+        self._load_history(run_dir)
 
         return self.start(title, problem)
 
@@ -88,6 +181,7 @@ class PipelineRunner:
         try:
             config = RunConfig(output_dir=self.output_dir)
             orchestrator = OrchestratorAgent(config=config)
+            logger.info("Orchestrator.run() starting for %r", title)
             state = orchestrator.run(
                 problem=problem,
                 ask_fn=self._web_ask_fn,
@@ -98,9 +192,11 @@ class PipelineRunner:
             )
             with self._lock:
                 self._state = state
+            logger.info("Pipeline completed for %r", title)
         except Exception as e:
             with self._lock:
                 self._error = str(e)
+            logger.exception("Pipeline failed for %r: %s", title, e)
             self._on_activity("orchestrator", "error", str(e), "error")
         finally:
             with self._lock:
@@ -164,6 +260,7 @@ class PipelineRunner:
                 self._pending_decisions = None
             return {}
 
+        logger.info("Waiting for user answers (%d questions)", len(q_dicts))
         # Block until web UI submits answers
         self._answer_event.wait()
 
@@ -173,6 +270,7 @@ class PipelineRunner:
             self._pending_decisions = None
             self._answers = {}
 
+        logger.info("Received answers: %s", list(answers.keys()))
         return answers
 
     # ── Activity callback ─────────────────────────────────────────
@@ -188,6 +286,9 @@ class PipelineRunner:
         }
         with self._lock:
             self._activities.append(entry)
+            self._persist_activities()
+
+        logger.info("[Activity] %s | %s | %s | %s", agent, action, status, detail[:120] if detail else "")
 
         # Surface errors to chat so the user sees them immediately
         if status == "error":
@@ -199,6 +300,15 @@ class PipelineRunner:
         """Called by the LoggingBackend after every LLM call."""
         with self._lock:
             self._llm_logs.append(entry)
+            self._persist_llm_logs()
+
+        logger.info(
+            "[LLM] agent=%s duration=%.1fs est_tokens=%d+%d",
+            entry.get("agent", "?"),
+            entry.get("duration", 0),
+            entry.get("est_input_tokens", 0),
+            entry.get("est_output_tokens", 0),
+        )
 
     # ── Thread-safe getters ───────────────────────────────────────
 
@@ -259,6 +369,9 @@ class PipelineRunner:
             entry["questions"] = questions
         with self._lock:
             self._chat.append(entry)
+            self._persist_chat()
+
+        logger.debug("[Chat] role=%s text=%s", role, text[:80] if text else "(empty)")
 
     def list_runs(self) -> list[dict]:
         """Delegate to OrchestratorAgent.list_runs()."""

@@ -16,6 +16,7 @@ import sys
 from .models import Question, Decision, ProjectSpec
 from .prompts import SYSTEM_PROMPT, ANALYZE_PROMPT, REFINE_PROMPT, GENERATE_SPEC_PROMPT
 from .llm import LLMBackend, ClaudeCLIBackend, extract_json
+from BrainDock.preambles import build_system_prompt, BUSINESS_OPS, DEV_OPS
 
 MAX_LLM_RETRIES = 2
 
@@ -67,6 +68,7 @@ class SpecAgent:
         self.conversation: list[dict] = []
         self.understanding: str = ""
         self._round = 0
+        self._sys_prompt = build_system_prompt(SYSTEM_PROMPT, BUSINESS_OPS, DEV_OPS)
         self._pending_questions: list[Question] | None = None
         self._pending_decisions: list[Decision] | None = None
         self.session_file = session_file or self.DEFAULT_SESSION_FILE
@@ -210,7 +212,7 @@ class SpecAgent:
     def analyze(self) -> AnalyzeResult:
         """Analyze the problem statement. LLM self-decides what it can."""
         prompt = ANALYZE_PROMPT.format(problem_statement=self.problem)
-        data = self._llm_query_json(SYSTEM_PROMPT, prompt)
+        data = self._llm_query_json(self._sys_prompt, prompt)
 
         self.understanding = data.get("understanding", "")
         decisions = self._parse_decisions(data)
@@ -264,7 +266,7 @@ class SpecAgent:
             problem_statement=self.problem,
             conversation_history=self._build_history(),
         )
-        data = self._llm_query_json(SYSTEM_PROMPT, prompt)
+        data = self._llm_query_json(self._sys_prompt, prompt)
 
         self.understanding = data.get("understanding", self.understanding)
         decisions = self._parse_decisions(data)
@@ -301,7 +303,7 @@ class SpecAgent:
             problem_statement=self.problem,
             conversation_history=self._build_history(),
         )
-        data = self._llm_query_json(SYSTEM_PROMPT, prompt)
+        data = self._llm_query_json(self._sys_prompt, prompt)
 
         return ProjectSpec.from_dict(data)
 
