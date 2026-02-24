@@ -113,6 +113,255 @@ SKILL_EXTRACT = json.dumps({
 })
 
 
+# ── Web App Skill Reuse Mocks ─────────────────────────────────────────
+
+# Run 1: JWT auth web app
+WEBAPP_SPEC_ANALYZE = json.dumps({
+    "understanding": "Building a web application with user authentication",
+    "self_decided": [
+        {"id": "d1", "topic": "Framework", "decision": "Python with Flask"},
+    ],
+    "user_questions": [],
+})
+
+WEBAPP_SPEC_REFINE = json.dumps({
+    "ready": True,
+    "understanding": "Web auth app — clear requirements",
+    "self_decided": [],
+    "user_questions": [],
+})
+
+WEBAPP_SPEC_GENERATE = json.dumps({
+    "title": "WebAuth",
+    "summary": "A web app with JWT authentication",
+    "problem_statement": "Need secure user login",
+    "goals": ["Secure authentication"],
+    "target_users": "Web users",
+    "user_stories": ["As a user, I want to log in securely"],
+    "functional_requirements": [
+        {"feature": "Login", "description": "JWT-based login endpoint",
+         "acceptance_criteria": ["Returns JWT token"], "priority": "must-have"}
+    ],
+    "non_functional_requirements": ["Secure"],
+    "tech_stack": {"language": "Python", "framework": "Flask"},
+    "architecture_overview": "REST API with JWT auth",
+    "data_models": [],
+    "api_endpoints": ["/api/login", "/api/protected"],
+    "milestones": [{"name": "v1", "description": "Auth", "deliverables": ["Login endpoint"]}],
+    "constraints": [],
+    "assumptions": [],
+    "open_questions": [],
+})
+
+WEBAPP_TASK_GRAPH = json.dumps({
+    "project_title": "WebAuth",
+    "tasks": [
+        {
+            "id": "t1",
+            "title": "Build JWT login endpoint",
+            "description": "Create /api/login that validates credentials and returns JWT tokens",
+            "depends_on": [],
+            "estimated_effort": "medium",
+            "tags": ["auth", "api"],
+            "risks": [],
+        }
+    ],
+})
+
+WEBAPP_PLAN = json.dumps({
+    "task_id": "t1",
+    "task_title": "Build JWT login endpoint",
+    "steps": [
+        {
+            "id": "s1",
+            "action": "Write auth module",
+            "description": "Create auth.py with JWT token generation and verification",
+            "tool": "write_file",
+            "expected_output": "auth.py file",
+        }
+    ],
+    "metrics": {
+        "confidence": 0.85,
+        "entropy": 0.15,
+        "estimated_steps": 1,
+        "complexity": "medium",
+    },
+    "relevant_skills": [],
+    "assumptions": [],
+})
+
+WEBAPP_EXEC_WRITE = json.dumps({
+    "step_id": "s1",
+    "action_type": "write_file",
+    "file_path": "auth.py",
+    "content": "import jwt\ndef login(username, password):\n    token = jwt.encode({'user': username}, 'secret')\n    return {'token': token}\n",
+    "verification": "File exists",
+})
+
+SKILL_JWT_AUTH = json.dumps({
+    "id": "skill_jwt_auth",
+    "name": "JWT Authentication Flow",
+    "description": "Implement JWT-based login with access and refresh tokens",
+    "tags": ["auth", "jwt", "security", "web"],
+    "pattern": "login endpoint validates credentials, issues JWT tokens, middleware verifies on protected routes",
+    "example_code": "import jwt\\ndef login(user, pwd):\\n    return jwt.encode({'sub': user}, SECRET)",
+})
+
+# Run 2: e-commerce CRUD app
+SHOP_SPEC_GENERATE = json.dumps({
+    "title": "ShopApp",
+    "summary": "E-commerce product catalog with REST API",
+    "problem_statement": "Need product management",
+    "goals": ["Product CRUD"],
+    "target_users": "Shoppers",
+    "user_stories": ["As an admin, I want to manage products"],
+    "functional_requirements": [
+        {"feature": "Products", "description": "CRUD API for products",
+         "acceptance_criteria": ["CRUD works"], "priority": "must-have"}
+    ],
+    "non_functional_requirements": ["Fast"],
+    "tech_stack": {"language": "Python", "framework": "Flask"},
+    "architecture_overview": "REST API with product model",
+    "data_models": [{"name": "Product", "fields": ["id", "name", "price"]}],
+    "api_endpoints": ["/api/products"],
+    "milestones": [{"name": "v1", "description": "CRUD", "deliverables": ["Product API"]}],
+    "constraints": [],
+    "assumptions": [],
+    "open_questions": [],
+})
+
+SHOP_TASK_GRAPH = json.dumps({
+    "project_title": "ShopApp",
+    "tasks": [
+        {
+            "id": "t1",
+            "title": "Build product CRUD API",
+            "description": "Create REST endpoints for product create, read, update, delete",
+            "depends_on": [],
+            "estimated_effort": "medium",
+            "tags": ["api", "crud"],
+            "risks": [],
+        }
+    ],
+})
+
+SHOP_PLAN = json.dumps({
+    "task_id": "t1",
+    "task_title": "Build product CRUD API",
+    "steps": [
+        {
+            "id": "s1",
+            "action": "Write product routes",
+            "description": "Create routes.py with CRUD endpoints for products",
+            "tool": "write_file",
+            "expected_output": "routes.py file",
+        }
+    ],
+    "metrics": {
+        "confidence": 0.9,
+        "entropy": 0.1,
+        "estimated_steps": 1,
+        "complexity": "medium",
+    },
+    "relevant_skills": ["skill_jwt_auth"],
+    "assumptions": [],
+})
+
+SHOP_EXEC_WRITE = json.dumps({
+    "step_id": "s1",
+    "action_type": "write_file",
+    "file_path": "routes.py",
+    "content": "from flask import Flask, jsonify\\napp = Flask(__name__)\\nproducts = []\\n@app.route('/api/products')\\ndef list_products():\\n    return jsonify(products)\\n",
+    "verification": "File exists",
+})
+
+SKILL_REST_CRUD = json.dumps({
+    "id": "skill_rest_crud",
+    "name": "REST CRUD API Pattern",
+    "description": "Standard REST API with Create, Read, Update, Delete endpoints",
+    "tags": ["api", "rest", "crud", "web", "flask"],
+    "pattern": "GET /items, POST /items, GET /items/:id, PUT /items/:id, DELETE /items/:id",
+    "example_code": "@app.route('/items', methods=['GET'])\\ndef list_items(): return jsonify(items)",
+})
+
+# Run 3: form validation app
+FORM_SPEC_GENERATE = json.dumps({
+    "title": "FormApp",
+    "summary": "Contact form with validation",
+    "problem_statement": "Need validated contact form",
+    "goals": ["Input validation"],
+    "target_users": "Site visitors",
+    "user_stories": ["As a user, I want clear form errors"],
+    "functional_requirements": [
+        {"feature": "Form", "description": "Contact form with server-side validation",
+         "acceptance_criteria": ["Validates email, required fields"], "priority": "must-have"}
+    ],
+    "non_functional_requirements": ["User-friendly errors"],
+    "tech_stack": {"language": "Python", "framework": "Flask"},
+    "architecture_overview": "Server-rendered form with validation",
+    "data_models": [],
+    "api_endpoints": ["/contact"],
+    "milestones": [{"name": "v1", "description": "Form", "deliverables": ["Contact page"]}],
+    "constraints": [],
+    "assumptions": [],
+    "open_questions": [],
+})
+
+FORM_TASK_GRAPH = json.dumps({
+    "project_title": "FormApp",
+    "tasks": [
+        {
+            "id": "t1",
+            "title": "Build validated contact form",
+            "description": "Create contact form with email and required-field validation",
+            "depends_on": [],
+            "estimated_effort": "small",
+            "tags": ["forms", "validation"],
+            "risks": [],
+        }
+    ],
+})
+
+FORM_PLAN = json.dumps({
+    "task_id": "t1",
+    "task_title": "Build validated contact form",
+    "steps": [
+        {
+            "id": "s1",
+            "action": "Write form handler",
+            "description": "Create form.py with validation logic",
+            "tool": "write_file",
+            "expected_output": "form.py file",
+        }
+    ],
+    "metrics": {
+        "confidence": 0.9,
+        "entropy": 0.1,
+        "estimated_steps": 1,
+        "complexity": "low",
+    },
+    "relevant_skills": [],
+    "assumptions": [],
+})
+
+FORM_EXEC_WRITE = json.dumps({
+    "step_id": "s1",
+    "action_type": "write_file",
+    "file_path": "form.py",
+    "content": "import re\\ndef validate(data):\\n    errors = {}\\n    if not data.get('email') or not re.match(r'.+@.+', data['email']):\\n        errors['email'] = 'Valid email required'\\n    return errors\\n",
+    "verification": "File exists",
+})
+
+SKILL_FORM_VALIDATION = json.dumps({
+    "id": "skill_form_validation",
+    "name": "Form Input Validation",
+    "description": "Server-side form validation with per-field error messages",
+    "tags": ["forms", "validation", "web", "ui"],
+    "pattern": "validate each field, collect errors dict, return errors or proceed",
+    "example_code": "def validate(data):\\n    errors = {}\\n    if not data.get('email'): errors['email'] = 'Required'\\n    return errors",
+})
+
+
 def make_pipeline_llm():
     """Mock LLM that returns responses for the full pipeline."""
     call_count = {"n": 0}
@@ -637,6 +886,353 @@ class TestReflectionResultNeedsHuman(unittest.TestCase):
         restored = ReflectionResult.from_dict({"summary": "test"})
         self.assertFalse(restored.needs_human)
         self.assertEqual(restored.escalation_reason, "")
+
+
+class TestRunConfigTokenBudget(unittest.TestCase):
+    """Test the new token budget fields on RunConfig."""
+
+    def test_defaults(self):
+        config = RunConfig()
+        self.assertEqual(config.global_token_budget, 500_000)
+        self.assertEqual(config.per_task_token_budget, 80_000)
+        self.assertTrue(config.context_optimization)
+
+    def test_roundtrip(self):
+        config = RunConfig(global_token_budget=100_000, per_task_token_budget=20_000, context_optimization=False)
+        d = config.to_dict()
+        restored = RunConfig.from_dict(d)
+        self.assertEqual(restored.global_token_budget, 100_000)
+        self.assertEqual(restored.per_task_token_budget, 20_000)
+        self.assertFalse(restored.context_optimization)
+
+    def test_from_dict_missing_fields(self):
+        restored = RunConfig.from_dict({"output_dir": "/tmp"})
+        self.assertEqual(restored.global_token_budget, 500_000)
+        self.assertEqual(restored.per_task_token_budget, 80_000)
+        self.assertTrue(restored.context_optimization)
+
+
+class TestPipelineStateTokenUsage(unittest.TestCase):
+    """Test the token_usage field on PipelineState."""
+
+    def test_default(self):
+        state = PipelineState()
+        self.assertEqual(state.token_usage, {})
+
+    def test_roundtrip(self):
+        state = PipelineState()
+        state.token_usage = {
+            "global_used": 10000,
+            "global_budget": 500000,
+            "global_pct": 0.02,
+            "task_id": "t1",
+            "task_used": 5000,
+            "task_budget": 80000,
+            "agent_totals": {"planner": {"input": 3000, "output": 2000}},
+        }
+        d = state.to_dict()
+        restored = PipelineState.from_dict(d)
+        self.assertEqual(restored.token_usage["global_used"], 10000)
+        self.assertEqual(restored.token_usage["task_id"], "t1")
+        self.assertEqual(restored.token_usage["agent_totals"]["planner"]["input"], 3000)
+
+    def test_from_dict_missing_token_usage(self):
+        """Backward compatibility: old state files without token_usage."""
+        restored = PipelineState.from_dict({"title": "Test", "problem": "Something"})
+        self.assertEqual(restored.token_usage, {})
+
+
+class TestGlobalSkillBankPath(unittest.TestCase):
+    """Test the global_skill_bank_path field on RunConfig."""
+
+    def test_global_skill_bank_path_default(self):
+        config = RunConfig()
+        self.assertEqual(config.global_skill_bank_path, "")
+        resolved = config.resolve_global_skill_bank_path()
+        self.assertEqual(resolved, os.path.join("output", "skill_bank", "skills.json"))
+
+    def test_global_skill_bank_path_custom(self):
+        config = RunConfig(global_skill_bank_path="/custom/path/skills.json")
+        self.assertEqual(config.resolve_global_skill_bank_path(), "/custom/path/skills.json")
+
+    def test_global_skill_bank_path_roundtrip(self):
+        config = RunConfig(global_skill_bank_path="/my/skills.json")
+        d = config.to_dict()
+        restored = RunConfig.from_dict(d)
+        self.assertEqual(restored.global_skill_bank_path, "/my/skills.json")
+        self.assertEqual(restored.resolve_global_skill_bank_path(), "/my/skills.json")
+
+    def test_global_skill_bank_path_from_dict_missing(self):
+        restored = RunConfig.from_dict({"output_dir": "/tmp/out"})
+        self.assertEqual(restored.global_skill_bank_path, "")
+        self.assertEqual(
+            restored.resolve_global_skill_bank_path(),
+            os.path.join("/tmp/out", "skill_bank", "skills.json"),
+        )
+
+
+class TestOrchestratorGuidance(unittest.TestCase):
+    """Test the _drain_guidance_text helper and check_guidance propagation."""
+
+    def test_drain_guidance_text_empty(self):
+        result = OrchestratorAgent._drain_guidance_text(None)
+        self.assertEqual(result, "")
+
+    def test_drain_guidance_text_no_messages(self):
+        result = OrchestratorAgent._drain_guidance_text(lambda: [])
+        self.assertEqual(result, "")
+
+    def test_drain_guidance_text_with_messages(self):
+        result = OrchestratorAgent._drain_guidance_text(
+            lambda: ["Use React", "Add tests"]
+        )
+        self.assertIn("USER GUIDANCE", result)
+        self.assertIn("- Use React", result)
+        self.assertIn("- Add tests", result)
+
+    def test_run_accepts_check_guidance(self):
+        """run() works with check_guidance callback (full pipeline)."""
+        config = RunConfig(output_dir=self._tmpdir)
+        orchestrator = OrchestratorAgent(llm=make_pipeline_llm(), config=config)
+
+        guidance_drained = {"count": 0}
+
+        def mock_guidance():
+            guidance_drained["count"] += 1
+            return []
+
+        def ask_fn(questions, decisions, understanding):
+            return {}
+
+        state = orchestrator.run(
+            problem="Build a CLI calculator",
+            ask_fn=ask_fn,
+            check_guidance=mock_guidance,
+        )
+        # Pipeline should complete successfully
+        self.assertEqual(state.spec["title"], "PyCalc")
+        self.assertEqual(state.completed_tasks, ["t1"])
+        # Guidance callback should have been called at least once
+        self.assertGreater(guidance_drained["count"], 0)
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+
+class TestGlobalSkillBankWebApp(unittest.TestCase):
+    """Integration tests: skills from web-app projects persist and get reused.
+
+    Simulates common web development scenarios (auth, CRUD APIs, forms)
+    to verify that skills learned in one pipeline run are available to
+    the planner in subsequent runs.
+    """
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    @staticmethod
+    def _make_llm(responses, captured_prompts=None):
+        """Create a mock LLM from a response list, optionally capturing prompts."""
+        call_count = {"n": 0}
+
+        def mock_fn(system_prompt, user_prompt):
+            if captured_prompts is not None:
+                captured_prompts.append({"system": system_prompt, "user": user_prompt})
+            idx = min(call_count["n"], len(responses) - 1)
+            call_count["n"] += 1
+            return responses[idx]
+
+        return CallableBackend(mock_fn)
+
+    def _webapp_llm(self, skill_resp=SKILL_JWT_AUTH, captured=None):
+        return self._make_llm([
+            WEBAPP_SPEC_ANALYZE, WEBAPP_SPEC_REFINE, WEBAPP_SPEC_GENERATE,
+            WEBAPP_TASK_GRAPH, WEBAPP_PLAN, WEBAPP_EXEC_WRITE, skill_resp,
+        ], captured)
+
+    def _shop_llm(self, captured=None):
+        return self._make_llm([
+            WEBAPP_SPEC_ANALYZE, WEBAPP_SPEC_REFINE, SHOP_SPEC_GENERATE,
+            SHOP_TASK_GRAPH, SHOP_PLAN, SHOP_EXEC_WRITE, SKILL_REST_CRUD,
+        ], captured)
+
+    def _form_llm(self, captured=None):
+        return self._make_llm([
+            WEBAPP_SPEC_ANALYZE, WEBAPP_SPEC_REFINE, FORM_SPEC_GENERATE,
+            FORM_TASK_GRAPH, FORM_PLAN, FORM_EXEC_WRITE, SKILL_FORM_VALIDATION,
+        ], captured)
+
+    def _ask(self, q, d, u):
+        return {}
+
+    # ── Test: skill creation ──────────────────────────────────────
+
+    def test_auth_skill_learned_and_saved_globally(self):
+        """Run builds login app -> JWT auth skill saved to global bank."""
+        config = RunConfig(output_dir=self._tmpdir)
+        o = OrchestratorAgent(llm=self._webapp_llm(), config=config)
+        state = o.run(problem="Build a web app with JWT login", ask_fn=self._ask)
+
+        self.assertEqual(len(state.learned_skills), 1)
+        self.assertEqual(state.learned_skills[0]["id"], "skill_jwt_auth")
+        self.assertEqual(state.learned_skills[0]["name"], "JWT Authentication Flow")
+
+        # Global skill bank file should exist and contain the skill
+        from BrainDock.skill_bank.storage import load_skill_bank
+        global_bank = load_skill_bank(config.resolve_global_skill_bank_path())
+        self.assertEqual(len(global_bank.skills), 1)
+        self.assertEqual(global_bank.get("skill_jwt_auth").name, "JWT Authentication Flow")
+        self.assertIn("auth", global_bank.get("skill_jwt_auth").tags)
+
+    def test_crud_skill_learned_and_saved_globally(self):
+        """Run builds e-commerce app -> REST CRUD skill saved to global bank."""
+        config = RunConfig(output_dir=self._tmpdir)
+        o = OrchestratorAgent(llm=self._shop_llm(), config=config)
+        state = o.run(problem="Build product catalog API", ask_fn=self._ask)
+
+        self.assertEqual(len(state.learned_skills), 1)
+        self.assertEqual(state.learned_skills[0]["id"], "skill_rest_crud")
+
+        from BrainDock.skill_bank.storage import load_skill_bank
+        global_bank = load_skill_bank(config.resolve_global_skill_bank_path())
+        self.assertIsNotNone(global_bank.get("skill_rest_crud"))
+        self.assertIn("crud", global_bank.get("skill_rest_crud").tags)
+
+    def test_form_validation_skill_learned(self):
+        """Run builds contact form -> validation skill saved to global bank."""
+        config = RunConfig(output_dir=self._tmpdir)
+        o = OrchestratorAgent(llm=self._form_llm(), config=config)
+        state = o.run(problem="Build a contact form with validation", ask_fn=self._ask)
+
+        self.assertEqual(state.learned_skills[0]["id"], "skill_form_validation")
+
+        from BrainDock.skill_bank.storage import load_skill_bank
+        global_bank = load_skill_bank(config.resolve_global_skill_bank_path())
+        self.assertIsNotNone(global_bank.get("skill_form_validation"))
+
+    # ── Test: skill reuse in next run ─────────────────────────────
+
+    def test_auth_skill_passed_to_planner_in_next_run(self):
+        """Skill from auth run appears in the planner prompt of the shop run."""
+        config = RunConfig(output_dir=self._tmpdir)
+
+        # Run 1: auth project -> learns JWT skill
+        o1 = OrchestratorAgent(llm=self._webapp_llm(), config=config)
+        o1.run(problem="Build a web app with JWT login", ask_fn=self._ask)
+
+        # Run 2: e-commerce project -> should see JWT skill in planner prompt
+        captured = []
+        o2 = OrchestratorAgent(llm=self._shop_llm(captured=captured), config=config)
+        state2 = o2.run(problem="Build product catalog API", ask_fn=self._ask)
+
+        self.assertEqual(state2.completed_tasks, ["t1"])
+
+        # The planner call should include the JWT skill from run 1
+        planner_calls = [
+            c for c in captured
+            if "Available skills from the skill bank" in c["user"]
+        ]
+        self.assertGreater(len(planner_calls), 0,
+                           "Planner should receive available skills from global bank")
+        self.assertIn("JWT Authentication Flow", planner_calls[0]["user"])
+        self.assertIn("skill_jwt_auth", planner_calls[0]["user"])
+
+    def test_multiple_skills_available_to_planner(self):
+        """After two runs, the third run's planner sees both learned skills."""
+        config = RunConfig(output_dir=self._tmpdir)
+
+        # Run 1: auth -> JWT skill
+        o1 = OrchestratorAgent(llm=self._webapp_llm(), config=config)
+        o1.run(problem="Build login system", ask_fn=self._ask)
+
+        # Run 2: shop -> CRUD skill
+        o2 = OrchestratorAgent(llm=self._shop_llm(), config=config)
+        o2.run(problem="Build product catalog", ask_fn=self._ask)
+
+        # Run 3: form app -> should see BOTH skills in planner prompt
+        captured = []
+        o3 = OrchestratorAgent(llm=self._form_llm(captured=captured), config=config)
+        o3.run(problem="Build contact form", ask_fn=self._ask)
+
+        planner_calls = [
+            c for c in captured
+            if "Available skills from the skill bank" in c["user"]
+        ]
+        self.assertGreater(len(planner_calls), 0)
+        prompt = planner_calls[0]["user"]
+        self.assertIn("skill_jwt_auth", prompt)
+        self.assertIn("skill_rest_crud", prompt)
+
+    # ── Test: skill accumulation ──────────────────────────────────
+
+    def test_skills_accumulate_across_three_runs(self):
+        """Skills from auth, CRUD, and form projects all end up in global bank."""
+        config = RunConfig(output_dir=self._tmpdir)
+
+        OrchestratorAgent(llm=self._webapp_llm(), config=config).run(
+            problem="Build login", ask_fn=self._ask)
+        OrchestratorAgent(llm=self._shop_llm(), config=config).run(
+            problem="Build shop", ask_fn=self._ask)
+        OrchestratorAgent(llm=self._form_llm(), config=config).run(
+            problem="Build form", ask_fn=self._ask)
+
+        from BrainDock.skill_bank.storage import load_skill_bank
+        global_bank = load_skill_bank(config.resolve_global_skill_bank_path())
+        self.assertEqual(len(global_bank.skills), 3)
+        self.assertIsNotNone(global_bank.get("skill_jwt_auth"))
+        self.assertIsNotNone(global_bank.get("skill_rest_crud"))
+        self.assertIsNotNone(global_bank.get("skill_form_validation"))
+
+    # ── Test: per-run copy preserved ──────────────────────────────
+
+    def test_per_run_copy_and_global_both_exist(self):
+        """Each run saves a per-project skill bank alongside the global one."""
+        config = RunConfig(output_dir=self._tmpdir)
+        o = OrchestratorAgent(llm=self._webapp_llm(), config=config)
+        o.run(problem="Build login app", ask_fn=self._ask)
+
+        from BrainDock.orchestrator.models import slugify
+        from BrainDock.skill_bank.storage import load_skill_bank
+
+        per_run_path = os.path.join(
+            self._tmpdir, slugify("Build login app"),
+            "skill_bank", "skills.json",
+        )
+        global_path = config.resolve_global_skill_bank_path()
+
+        self.assertTrue(os.path.exists(per_run_path), "Per-run skill bank should exist")
+        self.assertTrue(os.path.exists(global_path), "Global skill bank should exist")
+
+        per_run_bank = load_skill_bank(per_run_path)
+        global_bank = load_skill_bank(global_path)
+        self.assertEqual(len(per_run_bank.skills), 1)
+        self.assertEqual(len(global_bank.skills), 1)
+        self.assertEqual(
+            per_run_bank.get("skill_jwt_auth").name,
+            global_bank.get("skill_jwt_auth").name,
+        )
+
+    # ── Test: no skills → planner gets None ───────────────────────
+
+    def test_first_run_planner_gets_no_skills(self):
+        """On the very first run (empty global bank), planner gets no skills section."""
+        config = RunConfig(output_dir=self._tmpdir)
+        captured = []
+        o = OrchestratorAgent(llm=self._webapp_llm(captured=captured), config=config)
+        o.run(problem="Build first app ever", ask_fn=self._ask)
+
+        planner_calls = [
+            c for c in captured
+            if "Available skills from the skill bank" in c["user"]
+        ]
+        self.assertEqual(len(planner_calls), 0,
+                         "First run should not inject skills into planner prompt")
 
 
 if __name__ == "__main__":

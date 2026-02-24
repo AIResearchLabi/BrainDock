@@ -1,32 +1,22 @@
-"""Spec Agent — Interactive Project Specification Builder.
+"""Spec Agent — Interactive project specification (Mode 1).
 
-Usage as a library:
+Analyzes a problem statement, makes routine decisions autonomously,
+asks the user about critical/ambiguous choices, and generates a
+complete project specification.
+
+Usage:
     from BrainDock.spec_agent import SpecAgent, ProjectSpec
 
-    agent = SpecAgent(problem="Build a todo app with auth")
+    agent = SpecAgent(problem="Build a todo app", llm=my_backend)
     spec = agent.run(ask_fn=my_question_handler)
-    # spec is a ProjectSpec dataclass
-
-Usage from CLI:
-    python -m BrainDock.spec_agent "Build a todo app with auth"
 """
 
-from .agent import SpecAgent, AnalyzeResult
-from .models import ProjectSpec, Question, Decision, FunctionalRequirement, Milestone
-from .output import to_json, to_markdown, save_spec
-from .llm import ClaudeCLIBackend, CallableBackend
+from .models import Question, Decision, ProjectSpec
+from .agent import SpecAgent
 
 __all__ = [
-    "SpecAgent",
-    "AnalyzeResult",
-    "ProjectSpec",
     "Question",
     "Decision",
-    "FunctionalRequirement",
-    "Milestone",
-    "to_json",
-    "to_markdown",
-    "save_spec",
-    "ClaudeCLIBackend",
-    "CallableBackend",
+    "ProjectSpec",
+    "SpecAgent",
 ]

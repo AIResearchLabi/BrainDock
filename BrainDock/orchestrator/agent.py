@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Callable
 
 from BrainDock.llm import LLMBackend, ClaudeCLIBackend, LoggingBackend
-from BrainDock.project_memory import scan_project
+from BrainDock.project_memory import scan_project, ContextProfile
+from BrainDock.token_budget import TokenBudgetTracker, TokenBudgetConfig
 from BrainDock.spec_agent.agent import SpecAgent
 from BrainDock.spec_agent.models import Question, Decision
 from BrainDock.spec_agent.output import save_spec as save_spec_output
@@ -36,10 +37,41 @@ def _emit(on_activity, agent: str, action: str, detail: str = "", status: str = 
         on_activity(agent, action, detail, status)
 
 
+def _adaptive_profile(base_profile: str, budget_pct: float) -> str:
+    """Downgrade a context profile based on budget usage percentage.
+
+    As the budget gets consumed, automatically shrinks context to stretch
+    remaining tokens:
+        < 50% used  → use base profile as-is
+        50-80% used → downgrade one level (full→medium, medium→light, etc.)
+        > 80% used  → downgrade two levels (full→light, medium→minimal, etc.)
+
+    Args:
+        base_profile: The agent's default profile (e.g. "full", "medium").
+        budget_pct: Fraction of global budget used (0.0 to 1.0+).
+
+    Returns:
+        The (possibly downgraded) profile string.
+    """
+    levels = [ContextProfile.FULL, ContextProfile.MEDIUM, ContextProfile.LIGHT, ContextProfile.MINIMAL]
+    try:
+        idx = levels.index(base_profile)
+    except ValueError:
+        return base_profile
+
+    if budget_pct >= 0.8:
+        idx = min(idx + 2, len(levels) - 1)
+    elif budget_pct >= 0.5:
+        idx = min(idx + 1, len(levels) - 1)
+
+    return levels[idx]
+
+
 def _build_project_context(
     spec: dict,
     project_dir: str,
     completed_tasks: list[str] | None = None,
+    profile: str = ContextProfile.FULL,
 ) -> str:
     """Build enriched project context including file snapshot.
 
@@ -47,6 +79,7 @@ def _build_project_context(
         spec: Project specification dict.
         project_dir: Path to the project output directory.
         completed_tasks: List of completed task IDs.
+        profile: Context size profile — "full", "medium", "light", or "minimal".
 
     Returns:
         Context string for LLM prompts.
@@ -54,7 +87,7 @@ def _build_project_context(
     base = f"Project: {spec.get('title', '')}\nSummary: {spec.get('summary', '')}\n"
     if completed_tasks:
         base += f"Completed tasks: {', '.join(completed_tasks)}\n"
-    snapshot = scan_project(project_dir)
+    snapshot = scan_project(project_dir, profile=profile)
     base += "\n" + snapshot.to_context_string()
     return base
 
@@ -136,6 +169,50 @@ class OrchestratorAgent:
         hint = answers.get("escalation_hint", "").strip()
         return action, hint
 
+    def _check_budget_or_escalate(
+        self,
+        budget_tracker: TokenBudgetTracker,
+        ask_fn: Callable,
+        task_node,
+        state: PipelineState,
+        output_dir: str,
+        on_state: Callable | None = None,
+        on_activity: Callable | None = None,
+    ) -> str:
+        """Check budget before an LLM step, escalating to human if needed.
+
+        Returns:
+            "continue" if allowed, "skip" to skip task, "abort" to abort pipeline.
+        """
+        allowed, reason = budget_tracker.check_pre_step()
+        if allowed:
+            return "continue"
+
+        _emit(on_activity, "orchestrator", "escalation",
+              f"Task {task_node.id}: {reason}", "warning")
+
+        if not self.config.enable_human_escalation:
+            return "skip"
+
+        esc_answers = self._escalate_to_human(
+            ask_fn, task_node,
+            reason=reason,
+            context="",
+        )
+        esc_action, esc_hint = self._parse_escalation_response(esc_answers, task_node.id)
+        state.escalations.append({
+            "task_id": task_node.id,
+            "trigger": "token_budget_pre_step",
+            "reason": reason,
+            "action": esc_action,
+            "hint": esc_hint,
+        })
+        self._save_state(state, output_dir, on_state)
+
+        if esc_action == "abort":
+            _emit(on_activity, "orchestrator", "abort", "Human chose to abort pipeline", "error")
+        return esc_action
+
     def _save_state(self, state: PipelineState, output_dir: str, on_state: Callable | None = None) -> None:
         """Write pipeline state to JSON for dashboard consumption."""
         state_path = os.path.join(output_dir, "pipeline_state.json")
@@ -190,6 +267,16 @@ class OrchestratorAgent:
                     pass
         return runs
 
+    @staticmethod
+    def _drain_guidance_text(check_guidance) -> str:
+        """Drain pending user guidance and format as context block."""
+        if not check_guidance:
+            return ""
+        messages = check_guidance()
+        if not messages:
+            return ""
+        return "\n\nUSER GUIDANCE:\n" + "\n".join(f"- {m}" for m in messages)
+
     def run(
         self,
         problem: str,
@@ -198,6 +285,7 @@ class OrchestratorAgent:
         on_activity: Callable | None = None,
         on_state: Callable | None = None,
         on_llm_log: Callable | None = None,
+        check_guidance: Callable[[], list[str]] | None = None,
     ) -> PipelineState:
         """Run the full pipeline from problem statement to execution.
 
@@ -214,16 +302,38 @@ class OrchestratorAgent:
         Returns:
             PipelineState with all intermediate results.
         """
-        # Wrap LLM with logging if callback provided
+        # Create budget tracker
+        budget_config = TokenBudgetConfig(
+            global_token_budget=self.config.global_token_budget,
+            per_task_token_budget=self.config.per_task_token_budget,
+        )
+        budget_tracker = TokenBudgetTracker(config=budget_config)
+
+        # Wrap LLM with logging — always create LoggingBackend for budget tracking
         llm = self.llm
         logging_backend: LoggingBackend | None = None
-        if on_llm_log:
-            logging_backend = LoggingBackend(llm, on_log=on_llm_log)
-            llm = logging_backend
+
+        def _combined_log_hook(entry: dict) -> None:
+            budget_tracker.record(
+                entry.get("agent", "unknown"),
+                entry.get("est_input_tokens", 0),
+                entry.get("est_output_tokens", 0),
+            )
+            entry["_budget"] = budget_tracker.get_snapshot()
+            if on_llm_log:
+                on_llm_log(entry)
+
+        logging_backend = LoggingBackend(llm, on_log=_combined_log_hook)
+        llm = logging_backend
 
         def _set_agent(label: str) -> None:
             if logging_backend:
                 logging_backend.set_agent_label(label)
+
+        def _save_with_budget(state: PipelineState, output_dir: str) -> None:
+            """Save state with current budget snapshot."""
+            state.token_usage = budget_tracker.get_snapshot()
+            self._save_state(state, output_dir, on_state)
 
         # Resolve title and per-project output directory
         run_title = title or problem[:60]
@@ -308,9 +418,9 @@ class OrchestratorAgent:
         if self.config.skip_execution:
             return state
 
-        # ── Load skill bank ────────────────────────────────────────
-        skill_bank_path = os.path.join(output_dir, "skill_bank", "skills.json")
-        skill_bank = load_skill_bank(skill_bank_path)
+        # ── Load skill bank (global) ──────────────────────────────
+        global_skill_bank_path = self.config.resolve_global_skill_bank_path()
+        skill_bank = load_skill_bank(global_skill_bank_path)
 
         # ── Create project directory before task loop ──────────────
         project_dir = os.path.join(output_dir, "project")
@@ -358,14 +468,39 @@ class OrchestratorAgent:
                     failed_ids.discard(task_node.id)
 
                 task_dict = task_node.to_dict()
+                budget_tracker.start_task(task_node.id)
+                state.token_usage = budget_tracker.get_snapshot()
                 _emit(on_activity, "orchestrator", "task_start", f"Task: {task_node.id} — {task_node.title}")
 
                 try:
-                    # ── Refresh project context ───────────────────────
+                    # ── Refresh project context (full for planner) ────
+                    _budget_pct = budget_tracker.get_snapshot()["global_pct"] if self.config.context_optimization else 0
+                    _ctx_profile = _adaptive_profile(ContextProfile.FULL, _budget_pct) if self.config.context_optimization else ContextProfile.FULL
                     project_context = _build_project_context(
                         state.spec, project_dir,
                         completed_tasks=state.completed_tasks,
+                        profile=_ctx_profile,
                     )
+
+                    # ── Budget check before planning ──────────────────
+                    _budget_action = self._check_budget_or_escalate(
+                        budget_tracker, ask_fn, task_node, state,
+                        output_dir, on_state, on_activity,
+                    )
+                    if _budget_action == "abort":
+                        return state
+                    if _budget_action == "skip":
+                        task_graph.mark_failed(task_node.id)
+                        state.failed_tasks.append(task_node.id)
+                        self._save_state(state, output_dir, on_state)
+                        continue
+
+                    # ── Drain user guidance before planning ───────────
+                    guidance_text = self._drain_guidance_text(check_guidance)
+                    if guidance_text:
+                        project_context += guidance_text
+                        _emit(on_activity, "orchestrator", "guidance",
+                              f"User guidance applied before planning: {guidance_text[:200]}")
 
                     # ── Mode 3: Planning ──────────────────────────────
                     state.current_mode = Mode.PLANNING.value
@@ -392,13 +527,26 @@ class OrchestratorAgent:
 
                     # ── Market Study (if tagged) ──────────────────────
                     if "needs_market_study" in task_dict.get("tags", []):
-                        _set_agent("market_study")
-                        _emit(on_activity, "market_study", "mode_change", f"Market study for task: {task_node.id}")
-                        market_result = market_study_agent.analyze(task_dict, context=project_context)
-                        state.market_studies.append(market_result.to_dict())
-                        project_context += "\n\nMarket Study:\n" + market_result.to_context_string()
-                        _emit(on_activity, "market_study", "completed",
-                              f"Market study: {len(market_result.competitors)} competitors analyzed", "success")
+                        _budget_action = self._check_budget_or_escalate(
+                            budget_tracker, ask_fn, task_node, state,
+                            output_dir, on_state, on_activity,
+                        )
+                        if _budget_action == "abort":
+                            return state
+                        if _budget_action != "skip":
+                            _set_agent("market_study")
+                            _emit(on_activity, "market_study", "mode_change", f"Market study for task: {task_node.id}")
+                            _ms_profile = _adaptive_profile(ContextProfile.LIGHT, _budget_pct) if self.config.context_optimization else ContextProfile.FULL
+                            _ms_context = _build_project_context(
+                                state.spec, project_dir,
+                                completed_tasks=state.completed_tasks,
+                                profile=_ms_profile,
+                            )
+                            market_result = market_study_agent.analyze(task_dict, context=_ms_context)
+                            state.market_studies.append(market_result.to_dict())
+                            project_context += "\n\nMarket Study:\n" + market_result.to_context_string()
+                            _emit(on_activity, "market_study", "completed",
+                                  f"Market study: {len(market_result.competitors)} competitors analyzed", "success")
 
                     # ── Mode 4: Controller (plan gate) ────────────────
                     state.current_mode = Mode.CONTROLLER.value
@@ -411,20 +559,48 @@ class OrchestratorAgent:
                     if gate_result.action == "debate":
                         debate_gate = controller.check_debate_gate()
                         if debate_gate.passed:
-                            state.current_mode = Mode.DEBATE.value
-                            self._save_state(state, output_dir, on_state)
-                            _set_agent("debate")
-                            _emit(on_activity, "debate", "mode_change", "Starting multi-perspective debate")
-                            controller.state.record_debate()
-                            outcome = debate_agent.debate(plan_dict, context=project_context)
-                            state.debates.append(outcome.to_dict())
-                            if outcome.improved_plan:
-                                plan_dict = outcome.improved_plan
-                                _emit(on_activity, "debate", "completed", "Debate produced improved plan", "success")
+                            _budget_action = self._check_budget_or_escalate(
+                                budget_tracker, ask_fn, task_node, state,
+                                output_dir, on_state, on_activity,
+                            )
+                            if _budget_action == "abort":
+                                return state
+                            if _budget_action == "skip":
+                                _emit(on_activity, "debate", "skipped", "Budget exhausted, skipping debate")
                             else:
-                                _emit(on_activity, "debate", "completed", "Debate completed, keeping original plan")
+                                state.current_mode = Mode.DEBATE.value
+                                self._save_state(state, output_dir, on_state)
+                                _set_agent("debate")
+                                _emit(on_activity, "debate", "mode_change", "Starting multi-perspective debate")
+                                controller.state.record_debate()
+                                _db_profile = _adaptive_profile(ContextProfile.LIGHT, _budget_pct) if self.config.context_optimization else ContextProfile.FULL
+                                _db_context = _build_project_context(
+                                    state.spec, project_dir,
+                                    completed_tasks=state.completed_tasks,
+                                    profile=_db_profile,
+                                )
+                                outcome = debate_agent.debate(plan_dict, context=_db_context)
+                                state.debates.append(outcome.to_dict())
+                                if outcome.improved_plan:
+                                    plan_dict = outcome.improved_plan
+                                    _emit(on_activity, "debate", "completed", "Debate produced improved plan", "success")
+                                else:
+                                    _emit(on_activity, "debate", "completed", "Debate completed, keeping original plan")
                         else:
                             _emit(on_activity, "debate", "skipped", "Debate gate not passed")
+
+                    # ── Budget check before execution ─────────────────
+                    _budget_action = self._check_budget_or_escalate(
+                        budget_tracker, ask_fn, task_node, state,
+                        output_dir, on_state, on_activity,
+                    )
+                    if _budget_action == "abort":
+                        return state
+                    if _budget_action == "skip":
+                        task_graph.mark_failed(task_node.id)
+                        state.failed_tasks.append(task_node.id)
+                        self._save_state(state, output_dir, on_state)
+                        continue
 
                     # ── Mode 5: Execution ─────────────────────────────
                     state.current_mode = Mode.EXECUTION.value
@@ -432,10 +608,17 @@ class OrchestratorAgent:
                     _set_agent("executor")
                     _emit(on_activity, "executor", "mode_change", f"Executing task: {task_node.id}")
 
+                    _ex_profile = _adaptive_profile(ContextProfile.MEDIUM, _budget_pct) if self.config.context_optimization else ContextProfile.FULL
+                    _ex_context = _build_project_context(
+                        state.spec, project_dir,
+                        completed_tasks=state.completed_tasks,
+                        profile=_ex_profile,
+                    )
                     exec_result = executor.execute(
                         plan_dict,
                         project_dir=project_dir,
-                        project_file_context=project_context,
+                        project_file_context=_ex_context,
+                        check_guidance=check_guidance,
                     )
                     exec_dict = exec_result.to_dict()
                     state.execution_results.append(exec_dict)
@@ -488,23 +671,21 @@ class OrchestratorAgent:
                     # ── Mode 7: Reflection (if execution failed) ──────
                     if exec_gate.action == "reflect":
                         current_plan = plan_dict
-                        task_token_count = 0
-                        _token_hook_installed = False
-                        _original_on_log = None
-                        if logging_backend:
-                            _original_on_log = logging_backend._on_log
-                            _token_hook_installed = True
-                            def _token_tracking_hook(entry, _orig=_original_on_log):
-                                nonlocal task_token_count
-                                task_token_count += entry.get("est_input_tokens", 0) + entry.get("est_output_tokens", 0)
-                                if _orig:
-                                    _orig(entry)
-                            logging_backend._on_log = _token_tracking_hook
 
                         for retry_num in range(self.config.max_reflection_iterations):
                             ref_gate = controller.check_reflection_gate()
                             if not ref_gate.passed:
                                 _emit(on_activity, "reflection", "skipped", "Reflection gate not passed")
+                                break
+
+                            # Budget check before reflection
+                            _budget_action = self._check_budget_or_escalate(
+                                budget_tracker, ask_fn, task_node, state,
+                                output_dir, on_state, on_activity,
+                            )
+                            if _budget_action == "abort":
+                                return state
+                            if _budget_action == "skip":
                                 break
 
                             state.current_mode = Mode.REFLECTION.value
@@ -515,9 +696,12 @@ class OrchestratorAgent:
                             controller.state.record_reflection()
 
                             # Rebuild project context (files may have changed during execution)
+                            _budget_pct = budget_tracker.get_snapshot()["global_pct"] if self.config.context_optimization else 0
+                            _ref_profile = _adaptive_profile(ContextProfile.MEDIUM, _budget_pct) if self.config.context_optimization else ContextProfile.FULL
                             project_context = _build_project_context(
                                 state.spec, project_dir,
                                 completed_tasks=state.completed_tasks,
+                                profile=_ref_profile,
                             )
 
                             # Append verification errors to context
@@ -529,6 +713,13 @@ class OrchestratorAgent:
                                     f"Error: {verify_result.error_summary}\n"
                                     f"Stderr: {verify_result.stderr[:500]}"
                                 )
+
+                            # Drain user guidance before reflection
+                            guidance_text = self._drain_guidance_text(check_guidance)
+                            if guidance_text:
+                                reflect_context += guidance_text
+                                _emit(on_activity, "orchestrator", "guidance",
+                                      f"User guidance applied before reflection: {guidance_text[:200]}")
 
                             ref_result = reflection_agent.reflect(
                                 exec_dict, current_plan, context=reflect_context
@@ -576,47 +767,27 @@ class OrchestratorAgent:
                             # Retry execution with modified plan
                             current_plan = ref_result.modified_plan
 
-                            # ── Escalation Point 3: Token budget exceeded ──
-                            if (self.config.enable_human_escalation
-                                    and task_token_count > self.config.escalation_token_budget):
-                                _emit(on_activity, "orchestrator", "escalation",
-                                      f"Task {task_node.id}: token budget exceeded ({task_token_count} tokens)", "warning")
-                                esc_answers = self._escalate_to_human(
-                                    ask_fn, task_node,
-                                    reason=f"Token budget exceeded ({task_token_count} tokens used, budget: {self.config.escalation_token_budget})",
-                                    context=reflect_context,
-                                )
-                                esc_action, esc_hint = self._parse_escalation_response(esc_answers, task_node.id)
-                                state.escalations.append({
-                                    "task_id": task_node.id,
-                                    "trigger": "token_budget",
-                                    "reason": f"Token budget exceeded: {task_token_count}/{self.config.escalation_token_budget}",
-                                    "action": esc_action,
-                                    "hint": esc_hint,
-                                })
-                                self._save_state(state, output_dir, on_state)
-                                if esc_action == "abort":
-                                    _emit(on_activity, "orchestrator", "abort", "Human chose to abort pipeline", "error")
-                                    if _token_hook_installed:
-                                        logging_backend._on_log = _original_on_log
-                                    return state
-                                elif esc_action == "skip":
-                                    break
-                                elif esc_action == "retry" and esc_hint:
-                                    project_context = _build_project_context(
-                                        state.spec, project_dir,
-                                        completed_tasks=state.completed_tasks,
-                                    )
-                                    project_context += f"\n\nHuman guidance: {esc_hint}"
+                            # ── Budget check before retry execution ──
+                            _budget_action = self._check_budget_or_escalate(
+                                budget_tracker, ask_fn, task_node, state,
+                                output_dir, on_state, on_activity,
+                            )
+                            if _budget_action == "abort":
+                                return state
+                            if _budget_action == "skip":
+                                break
 
                             _set_agent("executor")
                             _emit(on_activity, "executor", "mode_change",
                                   f"Retrying with modified plan (attempt {retry_num + 1})")
 
-                            # Refresh context for retry
+                            # Refresh context for retry (adaptive profile)
+                            _budget_pct = budget_tracker.get_snapshot()["global_pct"] if self.config.context_optimization else 0
+                            _retry_profile = _adaptive_profile(ContextProfile.MEDIUM, _budget_pct) if self.config.context_optimization else ContextProfile.FULL
                             project_context = _build_project_context(
                                 state.spec, project_dir,
                                 completed_tasks=state.completed_tasks,
+                                profile=_retry_profile,
                             )
 
                             retry_result = executor.execute(
@@ -666,16 +837,17 @@ class OrchestratorAgent:
                                 self._save_state(state, output_dir, on_state)
                                 if esc_action == "abort":
                                     _emit(on_activity, "orchestrator", "abort", "Human chose to abort pipeline", "error")
-                                    if _token_hook_installed:
-                                        logging_backend._on_log = _original_on_log
                                     return state
                                 elif esc_action == "retry" and esc_hint:
                                     # One more attempt with human hint
                                     _emit(on_activity, "executor", "mode_change",
                                           f"Retrying with human guidance for task {task_node.id}")
+                                    _budget_pct = budget_tracker.get_snapshot()["global_pct"] if self.config.context_optimization else 0
+                                    _hint_profile = _adaptive_profile(ContextProfile.MEDIUM, _budget_pct) if self.config.context_optimization else ContextProfile.FULL
                                     hint_context = _build_project_context(
                                         state.spec, project_dir,
                                         completed_tasks=state.completed_tasks,
+                                        profile=_hint_profile,
                                     )
                                     hint_context += f"\n\nHuman guidance: {esc_hint}"
                                     retry_result = executor.execute(
@@ -691,10 +863,6 @@ class OrchestratorAgent:
                                         exec_dict = exec_result.to_dict()
                                         _emit(on_activity, "executor", "completed", "Human-guided retry succeeded", "success")
                                     # else: falls through to normal failure handling
-
-                        # Restore original logging hook
-                        if _token_hook_installed:
-                            logging_backend._on_log = _original_on_log
 
                     # ── Mode 6: Skill Learning ────────────────────────
                     if exec_result.success and not self.config.skip_skill_learning:
@@ -739,10 +907,18 @@ class OrchestratorAgent:
 
         # Save skill bank
         if state.learned_skills:
-            save_skill_bank(skill_bank, skill_bank_path)
+            # Per-run copy for traceability
+            per_run_path = os.path.join(output_dir, "skill_bank", "skills.json")
+            save_skill_bank(skill_bank, per_run_path)
+
+            # Merge into global bank (re-load to pick up concurrent additions)
+            global_bank = load_skill_bank(global_skill_bank_path)
+            global_bank.merge(skill_bank)
+            save_skill_bank(global_bank, global_skill_bank_path)
 
         # Update final task graph state
         state.task_graph = task_graph.to_dict()
+        state.token_usage = budget_tracker.get_snapshot()
         self._save_state(state, output_dir, on_state)
         _emit(on_activity, "orchestrator", "pipeline_done",
               f"Done: {len(state.completed_tasks)} completed, {len(state.failed_tasks)} failed", "success")

@@ -345,5 +345,56 @@ class TestPipelineRunnerListRuns(unittest.TestCase):
         self.assertEqual(runs[0]["total"], 2)
 
 
+# ── Tests: Guidance Queue ─────────────────────────────────────────────
+
+class TestGuidanceQueue(unittest.TestCase):
+    """Test the user guidance queue on PipelineRunner."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+        self.runner = PipelineRunner(output_dir=self._tmpdir)
+
+    def tearDown(self):
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_drain_empty(self):
+        result = self.runner.drain_guidance()
+        self.assertEqual(result, [])
+
+    def test_send_chat_queues_guidance(self):
+        self.runner.send_chat("Use React instead of Vue")
+        # Should be in both _chat and _pending_guidance
+        with self.runner._lock:
+            self.assertEqual(len(self.runner._pending_guidance), 1)
+            self.assertEqual(self.runner._pending_guidance[0], "Use React instead of Vue")
+        chat = self.runner.get_chat()
+        self.assertEqual(len(chat["entries"]), 1)
+        self.assertEqual(chat["entries"][0]["text"], "Use React instead of Vue")
+
+    def test_drain_clears_queue(self):
+        self.runner.send_chat("msg1")
+        self.runner.send_chat("msg2")
+        messages = self.runner.drain_guidance()
+        self.assertEqual(messages, ["msg1", "msg2"])
+        # Queue should be empty now
+        with self.runner._lock:
+            self.assertEqual(len(self.runner._pending_guidance), 0)
+
+    def test_drain_is_atomic(self):
+        self.runner.send_chat("msg1")
+        first = self.runner.drain_guidance()
+        second = self.runner.drain_guidance()
+        self.assertEqual(first, ["msg1"])
+        self.assertEqual(second, [])
+
+    def test_chat_still_logged(self):
+        """Messages still appear in get_chat() after drain."""
+        self.runner.send_chat("hello")
+        self.runner.drain_guidance()
+        chat = self.runner.get_chat()
+        self.assertEqual(len(chat["entries"]), 1)
+        self.assertEqual(chat["entries"][0]["text"], "hello")
+
+
 if __name__ == "__main__":
     unittest.main()

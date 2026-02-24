@@ -46,6 +46,55 @@ Respond in this exact JSON format:
 }}"""
 
 
+EXECUTE_BATCH_PROMPT = """\
+Execute these action steps from the plan.
+
+Steps:
+---
+{steps_json}
+---
+
+Project directory: {project_dir}
+
+Current project files:
+---
+{project_file_context}
+---
+
+{edit_file_context}
+
+For EACH step, produce the implementation. Respond with a JSON ARRAY \
+of action objects, one per step, in order:
+[
+  {{"step_id": "...", "action_type": "write_file|run_command|edit_file|create_dir|test",
+    "file_path": "...", "content": "...", "verification": "..."}}
+]"""
+
+
+EXECUTE_CONTINUATION_PROMPT = """\
+Continue executing the plan. Here is what was done so far:
+
+Session transcript:
+---
+{transcript}
+---
+
+Next steps to execute:
+---
+{steps_json}
+---
+
+Project directory: {project_dir}
+
+{edit_file_context}
+
+Respond with a JSON ARRAY of action objects, one per step, in order:
+[
+  {{"step_id": "...", "action_type": "write_file|run_command|edit_file|create_dir|test",
+    "file_path": "...", "content": "...", "verification": "..."}}
+]"""
+
+
 VERIFY_STEP_PROMPT = """\
 Verify the outcome of this execution step.
 

@@ -71,6 +71,15 @@ class SkillBank:
         if skill:
             skill.usage_count += 1
 
+    def merge(self, other: SkillBank) -> int:
+        """Merge skills from another bank. Returns count of new skills added."""
+        added = 0
+        for skill in other.skills:
+            if self.get(skill.id) is None:
+                added += 1
+            self.add(skill)
+        return added
+
     def to_dict(self) -> dict:
         return {"skills": [s.to_dict() for s in self.skills]}
 

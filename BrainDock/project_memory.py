@@ -35,6 +35,29 @@ MAX_SNAPSHOT_BYTES = 50_000
 MAX_FILE_BYTES = 8_000
 
 
+class ContextProfile:
+    """Context size profiles for different agent types."""
+    FULL = "full"        # 50KB — planner (needs full picture)
+    MEDIUM = "medium"    # 20KB — executor, reflection (need relevant files)
+    LIGHT = "light"      # 8KB  — debate, market study (architecture-level)
+    MINIMAL = "minimal"  # 3KB  — skill learning (just task description)
+
+
+PROFILE_BUDGETS = {
+    "full": 50_000,
+    "medium": 20_000,
+    "light": 8_000,
+    "minimal": 3_000,
+}
+
+PROFILE_MAX_FILE = {
+    "full": 8_000,
+    "medium": 4_000,
+    "light": 2_000,
+    "minimal": 1_000,
+}
+
+
 @dataclass
 class ProjectSnapshot:
     """Snapshot of a project directory for agent context."""
@@ -103,20 +126,25 @@ def _build_tree(project_dir: str) -> tuple[str, list[tuple[str, float, int]]]:
     return "\n".join(lines), files_meta
 
 
-def scan_project(project_dir: str) -> ProjectSnapshot:
+def scan_project(project_dir: str, profile: str = "full") -> ProjectSnapshot:
     """Scan a project directory and return a snapshot for agent context.
 
     Reads priority files first, then most recently modified files,
-    staying within the byte budget.
+    staying within the byte budget determined by the context profile.
 
     Args:
         project_dir: Path to the project directory.
+        profile: Context size profile — "full", "medium", "light", or "minimal".
+            Defaults to "full" for backward compatibility.
 
     Returns:
         ProjectSnapshot with file tree and key file contents.
     """
     if not os.path.isdir(project_dir):
         return ProjectSnapshot()
+
+    snapshot_budget = PROFILE_BUDGETS.get(profile, MAX_SNAPSHOT_BYTES)
+    file_budget = PROFILE_MAX_FILE.get(profile, MAX_FILE_BYTES)
 
     tree_str, files_meta = _build_tree(project_dir)
     total_files = len(files_meta)
@@ -148,11 +176,11 @@ def scan_project(project_dir: str) -> ProjectSnapshot:
     budget_used = len(tree_str.encode("utf-8", errors="replace"))
 
     for rel_path, _, size in read_order:
-        if budget_used >= MAX_SNAPSHOT_BYTES:
+        if budget_used >= snapshot_budget:
             break
         if _is_binary(rel_path):
             continue
-        if size > MAX_FILE_BYTES:
+        if size > file_budget:
             continue
         if size == 0:
             continue
@@ -161,10 +189,10 @@ def scan_project(project_dir: str) -> ProjectSnapshot:
         try:
             content = Path(full_path).read_text(errors="replace")
             content_bytes = len(content.encode("utf-8", errors="replace"))
-            if content_bytes > MAX_FILE_BYTES:
-                content = content[:MAX_FILE_BYTES] + "\n... (truncated)"
-                content_bytes = MAX_FILE_BYTES
-            if budget_used + content_bytes > MAX_SNAPSHOT_BYTES:
+            if content_bytes > file_budget:
+                content = content[:file_budget] + "\n... (truncated)"
+                content_bytes = file_budget
+            if budget_used + content_bytes > snapshot_budget:
                 break
             key_contents[rel_path] = content
             budget_used += content_bytes

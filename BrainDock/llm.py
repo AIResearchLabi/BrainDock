@@ -155,3 +155,69 @@ def extract_json(text: str) -> dict:
         f"Could not extract valid JSON from LLM response. "
         f"Response starts with: {text[:200]!r}"
     )
+
+
+def extract_json_or_list(text: str) -> dict | list:
+    """Like extract_json but also handles JSON arrays.
+
+    Handles: plain JSON objects/arrays, markdown code fences,
+    JSON embedded in prose, and empty/malformed responses.
+    """
+    text = text.strip()
+
+    if not text:
+        raise ValueError("LLM returned empty response")
+
+    # Try 1: direct parse
+    try:
+        result = json.loads(text)
+        if isinstance(result, (dict, list)):
+            return result
+    except json.JSONDecodeError:
+        pass
+
+    # Try 2: strip markdown code fences
+    if "```" in text:
+        parts = text.split("```")
+        for part in parts[1:]:
+            candidate = part.strip()
+            if candidate and candidate.split("\n", 1)[0].strip() in ("json", "JSON", ""):
+                candidate = candidate.split("\n", 1)[-1].strip() if "\n" in candidate else ""
+            if candidate:
+                try:
+                    result = json.loads(candidate)
+                    if isinstance(result, (dict, list)):
+                        return result
+                except json.JSONDecodeError:
+                    continue
+
+    # Try 3: find embedded JSON object or array
+    # Try whichever delimiter appears first in the text
+    first_brace = text.find("{")
+    first_bracket = text.find("[")
+
+    # Build candidates ordered by position (earliest first)
+    candidates = []
+    if first_brace != -1:
+        last_brace = text.rfind("}")
+        if last_brace > first_brace:
+            candidates.append((first_brace, text[first_brace:last_brace + 1]))
+    if first_bracket != -1:
+        last_bracket = text.rfind("]")
+        if last_bracket > first_bracket:
+            candidates.append((first_bracket, text[first_bracket:last_bracket + 1]))
+
+    candidates.sort(key=lambda x: x[0])
+
+    for _, candidate in candidates:
+        try:
+            result = json.loads(candidate)
+            if isinstance(result, (dict, list)):
+                return result
+        except json.JSONDecodeError:
+            continue
+
+    raise ValueError(
+        f"Could not extract valid JSON from LLM response. "
+        f"Response starts with: {text[:200]!r}"
+    )

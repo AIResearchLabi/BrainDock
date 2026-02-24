@@ -167,6 +167,86 @@ class TestSkillStorage(unittest.TestCase):
         self.assertEqual(loaded.get("s1").name, "Test")
 
 
+class TestSkillBankMerge(unittest.TestCase):
+    def test_merge_empty(self):
+        bank1 = SkillBank()
+        bank2 = SkillBank()
+        added = bank1.merge(bank2)
+        self.assertEqual(added, 0)
+        self.assertEqual(len(bank1.skills), 0)
+
+    def test_merge_adds_new(self):
+        bank1 = SkillBank()
+        bank2 = SkillBank()
+        bank2.add(Skill(id="s1", name="Skill 1", description="First"))
+        bank2.add(Skill(id="s2", name="Skill 2", description="Second"))
+        added = bank1.merge(bank2)
+        self.assertEqual(added, 2)
+        self.assertEqual(len(bank1.skills), 2)
+        self.assertIsNotNone(bank1.get("s1"))
+        self.assertIsNotNone(bank1.get("s2"))
+
+    def test_merge_updates_existing(self):
+        bank1 = SkillBank()
+        bank1.add(Skill(id="s1", name="Original", description="Original desc"))
+        bank2 = SkillBank()
+        bank2.add(Skill(id="s1", name="Updated", description="Updated desc"))
+        added = bank1.merge(bank2)
+        self.assertEqual(added, 0)
+        self.assertEqual(len(bank1.skills), 1)
+        self.assertEqual(bank1.get("s1").name, "Updated")
+
+    def test_merge_mixed(self):
+        bank1 = SkillBank()
+        bank1.add(Skill(id="s1", name="Existing", description="Stays"))
+        bank2 = SkillBank()
+        bank2.add(Skill(id="s1", name="Updated", description="Replaced"))
+        bank2.add(Skill(id="s2", name="New", description="Added"))
+        added = bank1.merge(bank2)
+        self.assertEqual(added, 1)
+        self.assertEqual(len(bank1.skills), 2)
+        self.assertEqual(bank1.get("s1").name, "Updated")
+        self.assertEqual(bank1.get("s2").name, "New")
+
+
+class TestGlobalSkillStorage(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_first_run_creates_global(self):
+        path = os.path.join(self._tmpdir, "skill_bank", "skills.json")
+        bank = SkillBank()
+        bank.add(Skill(id="s1", name="First", description="First run skill"))
+        save_skill_bank(bank, path)
+        self.assertTrue(os.path.exists(path))
+        loaded = load_skill_bank(path)
+        self.assertEqual(len(loaded.skills), 1)
+        self.assertEqual(loaded.get("s1").name, "First")
+
+    def test_second_run_merges(self):
+        path = os.path.join(self._tmpdir, "skill_bank", "skills.json")
+        # Run 1: save one skill
+        bank1 = SkillBank()
+        bank1.add(Skill(id="s1", name="Run1 Skill", description="From run 1"))
+        save_skill_bank(bank1, path)
+
+        # Run 2: load, add new skill, merge-save
+        run2_bank = SkillBank()
+        run2_bank.add(Skill(id="s2", name="Run2 Skill", description="From run 2"))
+        global_bank = load_skill_bank(path)
+        global_bank.merge(run2_bank)
+        save_skill_bank(global_bank, path)
+
+        # Verify both skills present
+        final = load_skill_bank(path)
+        self.assertEqual(len(final.skills), 2)
+        self.assertIsNotNone(final.get("s1"))
+        self.assertIsNotNone(final.get("s2"))
+
+
 class TestSkillLearningAgent(unittest.TestCase):
     def test_extract_skill(self):
         agent = SkillLearningAgent(llm=make_extract_llm())

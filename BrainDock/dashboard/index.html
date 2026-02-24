@@ -416,6 +416,87 @@
   .tag-blue { background: rgba(108,123,255,0.15); color: var(--accent); }
   .tag-purple { background: rgba(167,139,250,0.15); color: var(--purple); }
 
+  /* ─── Token Budget Panel ─── */
+  .budget-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+  }
+
+  .budget-panel .section-title { margin-bottom: 12px; }
+
+  .budget-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+
+  .budget-label {
+    font-size: 12px;
+    color: var(--text-dim);
+    min-width: 80px;
+    flex-shrink: 0;
+  }
+
+  .budget-bar-bg {
+    flex: 1;
+    height: 14px;
+    background: var(--surface2);
+    border-radius: 7px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .budget-bar-fill {
+    height: 100%;
+    border-radius: 7px;
+    transition: width 0.5s ease, background 0.3s ease;
+    min-width: 0;
+  }
+
+  .budget-bar-fill.green { background: var(--green); }
+  .budget-bar-fill.yellow { background: var(--yellow); }
+  .budget-bar-fill.red { background: var(--red); }
+
+  .budget-value {
+    font-size: 11px;
+    color: var(--text-dim);
+    min-width: 100px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-family: monospace;
+  }
+
+  .agent-budget-table {
+    width: 100%;
+    font-size: 11px;
+    border-collapse: collapse;
+    margin-top: 8px;
+  }
+
+  .agent-budget-table th {
+    text-align: left;
+    color: var(--text-dim);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .agent-budget-table td {
+    padding: 3px 8px;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+    font-family: monospace;
+  }
+
+  .agent-budget-table tr:nth-child(even) td {
+    background: rgba(255,255,255,0.02);
+  }
+
   /* ─── Tab 2: Agents ─── */
   #tab-agents {
     padding: 0;
@@ -882,6 +963,34 @@
       <span class="stat-value" id="statEscalations" style="color:var(--orange)">0</span>
       <span class="stat-label">Escalations</span>
     </div>
+    <div class="stat">
+      <span class="stat-value" id="statTokensUsed" style="color:var(--cyan)">0</span>
+      <span class="stat-label">Tokens Used</span>
+    </div>
+    <div class="stat">
+      <span class="stat-value" id="statTokenBudget" style="color:var(--text-dim)">0</span>
+      <span class="stat-label">Token Budget</span>
+    </div>
+  </div>
+
+  <!-- Token Budget Panel -->
+  <div class="budget-panel" id="budgetPanel" style="display:none">
+    <div class="section-title">Token Budget</div>
+    <div class="budget-row">
+      <span class="budget-label">Global</span>
+      <div class="budget-bar-bg">
+        <div class="budget-bar-fill green" id="budgetGlobalBar" style="width:0%"></div>
+      </div>
+      <span class="budget-value" id="budgetGlobalValue">0 / 0</span>
+    </div>
+    <div class="budget-row">
+      <span class="budget-label" id="budgetTaskLabel">Task</span>
+      <div class="budget-bar-bg">
+        <div class="budget-bar-fill green" id="budgetTaskBar" style="width:0%"></div>
+      </div>
+      <span class="budget-value" id="budgetTaskValue">0 / 0</span>
+    </div>
+    <div id="agentBudgetTableContainer"></div>
   </div>
 
   <!-- Main grid: active agent + task graph + results -->
@@ -943,6 +1052,7 @@
       <span class="logs-stat">Est. Input: <strong id="logsTotalInput">0</strong></span>
       <span class="logs-stat">Est. Output: <strong id="logsTotalOutput">0</strong></span>
       <span class="logs-stat">Total Time: <strong id="logsTotalTime">0s</strong></span>
+      <span class="logs-stat">Budget Remaining: <strong id="logsBudgetRemaining">—</strong></span>
     </div>
     <div class="logs-feed" id="logsFeed">
       <div class="empty-state" id="logsEmpty">No LLM calls yet. Start a pipeline to see Claude outputs.</div>
@@ -1180,6 +1290,7 @@ function renderProjectTab(state) {
   if (hasState || running) {
     statsBar.style.display = '';
     renderStats(state);
+    renderTokenBudget(state);
   } else {
     statsBar.style.display = 'none';
   }
@@ -1263,6 +1374,65 @@ function renderStats(state) {
   document.getElementById('statDebates').textContent = (state.debates || []).length;
   document.getElementById('statMarketStudies').textContent = (state.market_studies || []).length;
   document.getElementById('statEscalations').textContent = (state.escalations || []).length;
+
+  // Token budget stats
+  const tu = state.token_usage || {};
+  document.getElementById('statTokensUsed').textContent = (tu.global_used || 0).toLocaleString();
+  document.getElementById('statTokenBudget').textContent = (tu.global_budget || 0).toLocaleString();
+}
+
+function renderTokenBudget(state) {
+  const panel = document.getElementById('budgetPanel');
+  const tu = state.token_usage || {};
+  if (!tu.global_budget) { panel.style.display = 'none'; return; }
+  panel.style.display = '';
+
+  const globalPct = (tu.global_pct || 0) * 100;
+  const taskPct = (tu.task_pct || 0) * 100;
+
+  function barColor(pct) {
+    if (pct >= 95) return 'red';
+    if (pct >= 80) return 'yellow';
+    return 'green';
+  }
+
+  // Global bar
+  const gBar = document.getElementById('budgetGlobalBar');
+  gBar.style.width = Math.min(globalPct, 100) + '%';
+  gBar.className = 'budget-bar-fill ' + barColor(globalPct);
+  document.getElementById('budgetGlobalValue').textContent =
+    (tu.global_used || 0).toLocaleString() + ' / ' + (tu.global_budget || 0).toLocaleString();
+
+  // Task bar
+  const tBar = document.getElementById('budgetTaskBar');
+  tBar.style.width = Math.min(taskPct, 100) + '%';
+  tBar.className = 'budget-bar-fill ' + barColor(taskPct);
+  document.getElementById('budgetTaskLabel').textContent = tu.task_id ? 'Task: ' + tu.task_id : 'Task';
+  document.getElementById('budgetTaskValue').textContent =
+    (tu.task_used || 0).toLocaleString() + ' / ' + (tu.task_budget || 0).toLocaleString();
+
+  // Agent breakdown table
+  const agents = tu.agent_totals || {};
+  const container = document.getElementById('agentBudgetTableContainer');
+  const agentKeys = Object.keys(agents);
+  if (agentKeys.length === 0) { container.innerHTML = ''; return; }
+
+  let html = '<table class="agent-budget-table"><tr><th>Agent</th><th>Input</th><th>Output</th><th>Total</th></tr>';
+  agentKeys.sort().forEach(k => {
+    const a = agents[k];
+    const total = (a.input || 0) + (a.output || 0);
+    html += '<tr><td>' + esc(k) + '</td><td>' + (a.input || 0).toLocaleString() + '</td><td>' + (a.output || 0).toLocaleString() + '</td><td>' + total.toLocaleString() + '</td></tr>';
+  });
+  html += '</table>';
+  container.innerHTML = html;
+
+  // Update logs header budget remaining
+  const remaining = (tu.global_budget || 0) - (tu.global_used || 0);
+  const remEl = document.getElementById('logsBudgetRemaining');
+  if (remEl) {
+    remEl.textContent = remaining.toLocaleString();
+    remEl.style.color = remaining < 0 ? 'var(--red)' : (globalPct >= 80 ? 'var(--yellow)' : 'var(--green)');
+  }
 }
 
 function renderActiveAgent(state) {

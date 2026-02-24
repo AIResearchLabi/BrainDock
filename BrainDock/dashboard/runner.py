@@ -52,6 +52,9 @@ class PipelineRunner:
         # LLM call logs: list of {ts, agent, duration, system_prompt, user_prompt, response, est_*}
         self._llm_logs: list[dict] = []
 
+        # User guidance queue (drained by pipeline agents at checkpoints)
+        self._pending_guidance: list[str] = []
+
         # Question/answer synchronization
         self._pending_questions: list[dict] | None = None
         self._pending_decisions: list[dict] | None = None
@@ -189,6 +192,7 @@ class PipelineRunner:
                 on_activity=self._on_activity,
                 on_state=self._on_state_change,
                 on_llm_log=self._on_llm_log,
+                check_guidance=self.drain_guidance,
             )
             with self._lock:
                 self._state = state
@@ -359,9 +363,18 @@ class PipelineRunner:
         self._answer_event.set()
         return True
 
+    def drain_guidance(self) -> list[str]:
+        """Atomically drain pending user guidance. Thread-safe."""
+        with self._lock:
+            messages = list(self._pending_guidance)
+            self._pending_guidance.clear()
+            return messages
+
     def send_chat(self, message: str) -> None:
-        """Add a user message to the chat log."""
+        """Add a user message to the chat log and queue for pipeline guidance."""
         self._add_chat("user", message)
+        with self._lock:
+            self._pending_guidance.append(message)
 
     def _add_chat(self, role: str, text: str, questions: list[dict] | None = None) -> None:
         entry: dict[str, Any] = {"ts": time.time(), "role": role, "text": text}

@@ -156,6 +156,7 @@ def _print_help():
     print("  --plan-only          Stop after planning (skip execution)")
     print("  --no-skill-learning  Skip skill extraction")
     print("  --output-dir DIR     Base output directory (default: output)")
+    print("  --skill-bank PATH    Path to global skill bank (default: <output-dir>/skill_bank/skills.json)")
     print()
     print("Examples:")
     print('  python -m BrainDock --title "makeup-store" "Build a makeup e-commerce site"')
@@ -236,6 +237,10 @@ def main():
     if output_dir_val:
         config.output_dir = output_dir_val
 
+    skill_bank_val = _get_flag_value("--skill-bank")
+    if skill_bank_val:
+        config.global_skill_bank_path = skill_bank_val
+
     # ── --list: show all runs and exit ──
     if "--list" in sys.argv:
         _list_runs(config.output_dir)
@@ -247,7 +252,7 @@ def main():
 
     # Collect flag values to filter from positional args
     flag_values = set()
-    for flag in ("--output-dir", "--title", "--resume"):
+    for flag in ("--output-dir", "--title", "--resume", "--skill-bank"):
         val = _get_flag_value(flag)
         if val:
             flag_values.add(val)

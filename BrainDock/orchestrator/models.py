@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field, asdict
 from enum import Enum
@@ -33,6 +34,16 @@ class RunConfig:
     skip_skill_learning: bool = False
     enable_human_escalation: bool = True
     escalation_token_budget: int = 50000
+    global_token_budget: int = 500_000
+    per_task_token_budget: int = 80_000
+    context_optimization: bool = True
+    global_skill_bank_path: str = ""  # empty = derive from output_dir
+
+    def resolve_global_skill_bank_path(self) -> str:
+        """Resolved path to the global skill bank file."""
+        if self.global_skill_bank_path:
+            return self.global_skill_bank_path
+        return os.path.join(self.output_dir, "skill_bank", "skills.json")
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -50,6 +61,10 @@ class RunConfig:
             skip_skill_learning=data.get("skip_skill_learning", False),
             enable_human_escalation=data.get("enable_human_escalation", True),
             escalation_token_budget=data.get("escalation_token_budget", 50000),
+            global_token_budget=data.get("global_token_budget", 500_000),
+            per_task_token_budget=data.get("per_task_token_budget", 80_000),
+            context_optimization=data.get("context_optimization", True),
+            global_skill_bank_path=data.get("global_skill_bank_path", ""),
         )
 
 
@@ -80,6 +95,7 @@ class PipelineState:
     failed_tasks: list[str] = field(default_factory=list)
     verification_results: list[dict] = field(default_factory=list)
     escalations: list[dict] = field(default_factory=list)
+    token_usage: dict = field(default_factory=dict)
     error: str = ""
 
     def to_dict(self) -> dict:
@@ -93,7 +109,7 @@ class PipelineState:
             "current_mode", "spec", "task_graph", "plans",
             "execution_results", "learned_skills", "reflections",
             "debates", "market_studies", "completed_tasks", "failed_tasks",
-            "verification_results", "escalations", "error",
+            "verification_results", "escalations", "token_usage", "error",
         ):
             if key in data:
                 setattr(state, key, data[key])

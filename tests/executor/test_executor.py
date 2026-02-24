@@ -205,5 +205,441 @@ class TestExecutorAgent(unittest.TestCase):
         self.assertIn("Max steps", result.stop_reason)
 
 
+# ── Batch / Session Tests ─────────────────────────────────────────────
+
+from BrainDock.executor.agent import _ExecutionSession
+from BrainDock.llm import extract_json_or_list
+from BrainDock.base_agent import BaseAgent
+
+
+class TestExecutionSession(unittest.TestCase):
+    def test_empty_session(self):
+        s = _ExecutionSession()
+        self.assertTrue(s.is_empty)
+        self.assertEqual(s.get_transcript(), "")
+
+    def test_add_outcome(self):
+        s = _ExecutionSession()
+        s.add_outcome("s1", "write_file", True, "wrote file")
+        self.assertFalse(s.is_empty)
+        self.assertIn("s1", s.get_transcript())
+        self.assertIn("OK", s.get_transcript())
+
+    def test_add_failure_outcome(self):
+        s = _ExecutionSession()
+        s.add_outcome("s1", "run_command", False, "exit code 1")
+        self.assertIn("FAIL", s.get_transcript())
+
+    def test_needs_compression(self):
+        s = _ExecutionSession(session_token_limit=50)
+        s.add_outcome("s1", "write_file", True, "x" * 100)
+        self.assertTrue(s.needs_compression())
+
+    def test_no_compression_needed(self):
+        s = _ExecutionSession(session_token_limit=8000)
+        s.add_outcome("s1", "write_file", True, "ok")
+        self.assertFalse(s.needs_compression())
+
+    def test_compress_keeps_recent(self):
+        s = _ExecutionSession(session_token_limit=10)
+        for i in range(6):
+            s.add_outcome(f"s{i}", "write_file", True, f"step {i}")
+        s.compress()
+        transcript = s.get_transcript()
+        # Last 3 entries preserved verbatim
+        self.assertIn("s3", transcript)
+        self.assertIn("s4", transcript)
+        self.assertIn("s5", transcript)
+        # Older entries in summary
+        self.assertIn("Completed 3 earlier steps", transcript)
+
+    def test_compress_summarizes_old(self):
+        s = _ExecutionSession(session_token_limit=10)
+        for i in range(5):
+            s.add_outcome(f"step{i}", "write_file", True, f"output {i}")
+        s.compress()
+        transcript = s.get_transcript()
+        self.assertIn("step0", transcript)  # in summary
+        self.assertIn("step1", transcript)  # in summary
+        self.assertIn("step4", transcript)  # verbatim (last 3)
+
+    def test_multiple_compressions(self):
+        s = _ExecutionSession(session_token_limit=10)
+        for i in range(5):
+            s.add_outcome(f"s{i}", "write_file", True, "x" * 20)
+        s.compress()
+        # Add more entries and compress again
+        for i in range(5, 10):
+            s.add_outcome(f"s{i}", "write_file", True, "y" * 20)
+        s.compress()
+        transcript = s.get_transcript()
+        # Should still have last 3 entries
+        self.assertIn("s7", transcript)
+        self.assertIn("s8", transcript)
+        self.assertIn("s9", transcript)
+
+
+class TestMakeBatches(unittest.TestCase):
+    def setUp(self):
+        self._agent = ExecutorAgent(
+            llm=CallableBackend(lambda s, u: "{}"),
+            stop_condition=StopCondition(batch_size=3),
+        )
+
+    def test_simple_batching(self):
+        steps = [
+            {"id": f"s{i}", "tool": "write_file"} for i in range(6)
+        ]
+        batches = self._agent._make_batches(steps, 3)
+        self.assertEqual(len(batches), 2)
+        self.assertEqual(len(batches[0]), 3)
+        self.assertEqual(len(batches[1]), 3)
+
+    def test_run_command_terminates_batch(self):
+        steps = [
+            {"id": "s1", "tool": "write_file"},
+            {"id": "s2", "tool": "run_command"},
+            {"id": "s3", "tool": "write_file"},
+        ]
+        batches = self._agent._make_batches(steps, 4)
+        self.assertEqual(len(batches), 2)
+        self.assertEqual(len(batches[0]), 2)  # s1, s2 (run_command terminates)
+        self.assertEqual(len(batches[1]), 1)  # s3
+
+    def test_test_terminates_batch(self):
+        steps = [
+            {"id": "s1", "tool": "write_file"},
+            {"id": "s2", "tool": "test"},
+            {"id": "s3", "tool": "write_file"},
+        ]
+        batches = self._agent._make_batches(steps, 4)
+        self.assertEqual(len(batches), 2)
+        self.assertEqual(len(batches[0]), 2)
+        self.assertEqual(len(batches[1]), 1)
+
+    def test_single_step_batch(self):
+        steps = [{"id": "s1", "tool": "write_file"}]
+        batches = self._agent._make_batches(steps, 4)
+        self.assertEqual(len(batches), 1)
+        self.assertEqual(len(batches[0]), 1)
+
+    def test_empty_steps(self):
+        batches = self._agent._make_batches([], 4)
+        self.assertEqual(batches, [])
+
+
+class TestBatchExecution(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_execute_batch_first_call(self):
+        """First batch uses full project context (EXECUTE_BATCH_PROMPT)."""
+        batch_response = json.dumps([
+            {"step_id": "s1", "action_type": "write_file",
+             "file_path": "a.py", "content": "# file a", "verification": ""},
+            {"step_id": "s2", "action_type": "write_file",
+             "file_path": "b.py", "content": "# file b", "verification": ""},
+        ])
+        prompts_seen = []
+
+        def mock_fn(system_prompt, user_prompt):
+            prompts_seen.append(user_prompt)
+            return batch_response
+
+        agent = ExecutorAgent(llm=CallableBackend(mock_fn))
+        session = _ExecutionSession()
+        steps = [
+            {"id": "s1", "tool": "write_file"},
+            {"id": "s2", "tool": "write_file"},
+        ]
+        outcomes = agent._execute_batch(steps, self._tmpdir, session, "project files here")
+        self.assertEqual(len(outcomes), 2)
+        self.assertTrue(outcomes[0].success)
+        self.assertTrue(outcomes[1].success)
+        # First call should use full project context
+        self.assertIn("project files here", prompts_seen[0])
+
+    def test_execute_batch_continuation(self):
+        """Subsequent batches use transcript (EXECUTE_CONTINUATION_PROMPT)."""
+        batch_response = json.dumps([
+            {"step_id": "s3", "action_type": "write_file",
+             "file_path": "c.py", "content": "# file c", "verification": ""},
+        ])
+        prompts_seen = []
+
+        def mock_fn(system_prompt, user_prompt):
+            prompts_seen.append(user_prompt)
+            return batch_response
+
+        agent = ExecutorAgent(llm=CallableBackend(mock_fn))
+        session = _ExecutionSession()
+        # Simulate prior batch by adding an outcome
+        session.add_outcome("s1", "write_file", True, "wrote a.py")
+        steps = [{"id": "s3", "tool": "write_file"}]
+        outcomes = agent._execute_batch(steps, self._tmpdir, session, "project files here")
+        self.assertEqual(len(outcomes), 1)
+        self.assertTrue(outcomes[0].success)
+        # Continuation should include transcript, not full project context
+        self.assertIn("Session transcript", prompts_seen[0])
+        self.assertNotIn("Current project files", prompts_seen[0])
+
+    def test_execute_with_batching(self):
+        """Full execute() with batch_size=2."""
+        call_count = {"n": 0}
+
+        def mock_fn(system_prompt, user_prompt):
+            call_count["n"] += 1
+            return json.dumps([
+                {"step_id": "sx", "action_type": "write_file",
+                 "file_path": f"f{call_count['n']}.py", "content": "# ok",
+                 "verification": ""},
+                {"step_id": "sy", "action_type": "write_file",
+                 "file_path": f"g{call_count['n']}.py", "content": "# ok",
+                 "verification": ""},
+            ])
+
+        agent = ExecutorAgent(
+            llm=CallableBackend(mock_fn),
+            stop_condition=StopCondition(batch_size=2),
+        )
+        plan = {
+            "task_id": "t1",
+            "steps": [
+                {"id": "s1", "tool": "write_file"},
+                {"id": "s2", "tool": "write_file"},
+                {"id": "s3", "tool": "write_file"},
+                {"id": "s4", "tool": "write_file"},
+            ],
+        }
+        result = agent.execute(plan, project_dir=self._tmpdir)
+        self.assertTrue(result.success)
+        self.assertEqual(result.steps_completed, 4)
+        # Should have made 2 LLM calls (2 batches of 2)
+        self.assertEqual(call_count["n"], 2)
+
+    def test_execute_batch_handles_fewer_actions(self):
+        """Graceful handling when LLM returns fewer actions than steps."""
+        # Only return 1 action for 2 steps
+        batch_response = json.dumps([
+            {"step_id": "s1", "action_type": "write_file",
+             "file_path": "a.py", "content": "# a", "verification": ""},
+        ])
+        agent = ExecutorAgent(llm=CallableBackend(lambda s, u: batch_response))
+        session = _ExecutionSession()
+        steps = [
+            {"id": "s1", "tool": "write_file"},
+            {"id": "s2", "tool": "write_file"},
+        ]
+        outcomes = agent._execute_batch(steps, self._tmpdir, session, "ctx")
+        self.assertEqual(len(outcomes), 2)
+        self.assertTrue(outcomes[0].success)
+        # Second step gets skip fallback — still succeeds
+        self.assertTrue(outcomes[1].success)
+
+
+class TestExtractJsonList(unittest.TestCase):
+    def test_extract_json_array(self):
+        text = '[{"a": 1}, {"b": 2}]'
+        result = extract_json_or_list(text)
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 2)
+
+    def test_extract_json_array_in_markdown(self):
+        text = '```json\n[{"a": 1}]\n```'
+        result = extract_json_or_list(text)
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 1)
+
+    def test_extract_json_dict_still_works(self):
+        text = '{"key": "value"}'
+        result = extract_json_or_list(text)
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result["key"], "value")
+
+    def test_extract_json_array_in_prose(self):
+        text = 'Here is the result:\n[{"x": 1}]\nDone.'
+        result = extract_json_or_list(text)
+        self.assertIsInstance(result, list)
+
+    def test_extract_json_or_list_empty(self):
+        with self.assertRaises(ValueError):
+            extract_json_or_list("")
+
+
+class TestLlmQueryJsonList(unittest.TestCase):
+    def test_returns_list(self):
+        backend = CallableBackend(lambda s, u: '[{"a": 1}, {"b": 2}]')
+        agent = BaseAgent(llm=backend)
+        result = agent._llm_query_json_list("sys", "user")
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 2)
+
+    def test_wraps_dict_in_list(self):
+        backend = CallableBackend(lambda s, u: '{"a": 1}')
+        agent = BaseAgent(llm=backend)
+        result = agent._llm_query_json_list("sys", "user")
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["a"], 1)
+
+
+class TestStopConditionBatchFields(unittest.TestCase):
+    def test_defaults(self):
+        s = StopCondition()
+        self.assertEqual(s.batch_size, 4)
+        self.assertEqual(s.session_token_limit, 8000)
+
+    def test_roundtrip(self):
+        s = StopCondition(batch_size=2, session_token_limit=4000)
+        d = s.to_dict()
+        restored = StopCondition.from_dict(d)
+        self.assertEqual(restored.batch_size, 2)
+        self.assertEqual(restored.session_token_limit, 4000)
+
+    def test_from_dict_defaults(self):
+        """from_dict with missing batch fields uses defaults."""
+        s = StopCondition.from_dict({"max_steps": 10})
+        self.assertEqual(s.max_steps, 10)
+        self.assertEqual(s.batch_size, 4)
+        self.assertEqual(s.session_token_limit, 8000)
+
+
+# ── Guidance Integration Tests ─────────────────────────────────────────
+
+class TestGuidanceIntegration(unittest.TestCase):
+    """Test that check_guidance callback injects guidance into executor prompts."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_execute_with_guidance_callback(self):
+        """Guidance from callback is injected into the LLM prompt."""
+        prompts_seen = []
+        batch_response = json.dumps([
+            {"step_id": "s1", "action_type": "write_file",
+             "file_path": "a.py", "content": "# guided", "verification": ""},
+        ])
+
+        def mock_fn(system_prompt, user_prompt):
+            prompts_seen.append(user_prompt)
+            return batch_response
+
+        guidance_calls = {"n": 0}
+
+        def mock_guidance():
+            guidance_calls["n"] += 1
+            if guidance_calls["n"] == 1:
+                return ["Use TypeScript instead of JavaScript"]
+            return []
+
+        agent = ExecutorAgent(llm=CallableBackend(mock_fn))
+        plan = {
+            "task_id": "t1",
+            "steps": [{"id": "s1", "tool": "write_file"}],
+        }
+        result = agent.execute(plan, project_dir=self._tmpdir, check_guidance=mock_guidance)
+        self.assertTrue(result.success)
+        # Guidance should appear in the prompt
+        self.assertTrue(any("TypeScript" in p for p in prompts_seen))
+
+    def test_execute_no_guidance_callback(self):
+        """execute() works fine with check_guidance=None (backward compat)."""
+        batch_response = json.dumps([
+            {"step_id": "s1", "action_type": "write_file",
+             "file_path": "a.py", "content": "# ok", "verification": ""},
+        ])
+        agent = ExecutorAgent(llm=CallableBackend(lambda s, u: batch_response))
+        plan = {
+            "task_id": "t1",
+            "steps": [{"id": "s1", "tool": "write_file"}],
+        }
+        result = agent.execute(plan, project_dir=self._tmpdir, check_guidance=None)
+        self.assertTrue(result.success)
+
+    def test_guidance_appears_in_continuation(self):
+        """Guidance text appears in continuation prompt (non-empty session)."""
+        prompts_seen = []
+        call_count = {"n": 0}
+
+        def mock_fn(system_prompt, user_prompt):
+            call_count["n"] += 1
+            prompts_seen.append(user_prompt)
+            return json.dumps([
+                {"step_id": "sx", "action_type": "write_file",
+                 "file_path": f"f{call_count['n']}.py", "content": "# ok",
+                 "verification": ""},
+            ])
+
+        guidance_calls = {"n": 0}
+
+        def mock_guidance():
+            guidance_calls["n"] += 1
+            if guidance_calls["n"] == 2:
+                return ["Add error handling"]
+            return []
+
+        agent = ExecutorAgent(
+            llm=CallableBackend(mock_fn),
+            stop_condition=StopCondition(batch_size=1),
+        )
+        plan = {
+            "task_id": "t1",
+            "steps": [
+                {"id": "s1", "tool": "write_file"},
+                {"id": "s2", "tool": "write_file"},
+            ],
+        }
+        agent.execute(plan, project_dir=self._tmpdir, check_guidance=mock_guidance)
+        # Second prompt (continuation) should contain guidance
+        self.assertTrue(len(prompts_seen) >= 2)
+        self.assertIn("Add error handling", prompts_seen[1])
+
+    def test_guidance_recorded_in_session(self):
+        """Guidance is recorded in the session transcript for subsequent batches."""
+        prompts_seen = []
+        call_count = {"n": 0}
+
+        def mock_fn(system_prompt, user_prompt):
+            call_count["n"] += 1
+            prompts_seen.append(user_prompt)
+            return json.dumps([
+                {"step_id": "sx", "action_type": "write_file",
+                 "file_path": f"f{call_count['n']}.py", "content": "# ok",
+                 "verification": ""},
+            ])
+
+        guidance_calls = {"n": 0}
+
+        def mock_guidance():
+            guidance_calls["n"] += 1
+            if guidance_calls["n"] == 1:
+                return ["Use dataclasses"]
+            return []
+
+        agent = ExecutorAgent(
+            llm=CallableBackend(mock_fn),
+            stop_condition=StopCondition(batch_size=1),
+        )
+        plan = {
+            "task_id": "t1",
+            "steps": [
+                {"id": "s1", "tool": "write_file"},
+                {"id": "s2", "tool": "write_file"},
+                {"id": "s3", "tool": "write_file"},
+            ],
+        }
+        agent.execute(plan, project_dir=self._tmpdir, check_guidance=mock_guidance)
+        # Third prompt should contain the transcript which includes guidance
+        self.assertTrue(len(prompts_seen) >= 3)
+        # The continuation prompt includes session transcript with guidance entry
+        self.assertIn("user_message", prompts_seen[2])
+
+
 if __name__ == "__main__":
     unittest.main()

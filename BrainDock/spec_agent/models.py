@@ -2,25 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field, asdict
-from typing import Any
-
-
-@dataclass
-class Decision:
-    """A decision the agent made autonomously (not asked to user)."""
-    id: str
-    topic: str
-    decision: str
-
-    def to_dict(self) -> dict:
-        return asdict(self)
 
 
 @dataclass
 class Question:
-    """A clarifying question the agent asks the user."""
+    """A question the LLM needs the user to answer."""
     id: str
     question: str
     why: str
@@ -29,40 +16,51 @@ class Question:
     def to_dict(self) -> dict:
         return asdict(self)
 
+    @classmethod
+    def from_dict(cls, data: dict) -> Question:
+        return cls(
+            id=data["id"],
+            question=data["question"],
+            why=data["why"],
+            options=data.get("options", []),
+        )
+
 
 @dataclass
-class Milestone:
-    """A project milestone with deliverables."""
-    name: str
-    description: str
-    deliverables: list[str] = field(default_factory=list)
+class Decision:
+    """A decision the LLM made autonomously."""
+    id: str
+    topic: str
+    decision: str
 
+    def to_dict(self) -> dict:
+        return asdict(self)
 
-@dataclass
-class FunctionalRequirement:
-    """A functional requirement with acceptance criteria."""
-    feature: str
-    description: str
-    acceptance_criteria: list[str] = field(default_factory=list)
-    priority: str = "must-have"  # must-have | should-have | nice-to-have
+    @classmethod
+    def from_dict(cls, data: dict) -> Decision:
+        return cls(
+            id=data["id"],
+            topic=data["topic"],
+            decision=data["decision"],
+        )
 
 
 @dataclass
 class ProjectSpec:
-    """The final structured project specification."""
+    """Complete project specification produced by the Spec Agent."""
     title: str = ""
     summary: str = ""
     problem_statement: str = ""
     goals: list[str] = field(default_factory=list)
     target_users: str = ""
-    user_stories: list[str] = field(default_factory=list)
-    functional_requirements: list[FunctionalRequirement] = field(default_factory=list)
-    non_functional_requirements: list[str] = field(default_factory=list)
-    tech_stack: dict[str, str] = field(default_factory=dict)
+    user_stories: list[dict] = field(default_factory=list)
+    functional_requirements: list[dict] = field(default_factory=list)
+    non_functional_requirements: list[dict] = field(default_factory=list)
+    tech_stack: dict = field(default_factory=dict)
     architecture_overview: str = ""
-    data_models: list[dict[str, Any]] = field(default_factory=list)
-    api_endpoints: list[dict[str, str]] = field(default_factory=list)
-    milestones: list[Milestone] = field(default_factory=list)
+    data_models: list[dict] = field(default_factory=list)
+    api_endpoints: list[dict] = field(default_factory=list)
+    milestones: list[dict] = field(default_factory=list)
     constraints: list[str] = field(default_factory=list)
     assumptions: list[str] = field(default_factory=list)
     open_questions: list[str] = field(default_factory=list)
@@ -70,45 +68,23 @@ class ProjectSpec:
     def to_dict(self) -> dict:
         return asdict(self)
 
-    def to_json(self, indent: int = 2) -> str:
-        return json.dumps(self.to_dict(), indent=indent)
-
     @classmethod
     def from_dict(cls, data: dict) -> ProjectSpec:
-        spec = cls()
-        # Simple fields
-        for key in ("title", "summary", "problem_statement", "target_users",
-                     "architecture_overview"):
-            if key in data:
-                setattr(spec, key, data[key])
-
-        # List of strings
-        for key in ("goals", "user_stories", "non_functional_requirements",
-                     "constraints", "assumptions", "open_questions"):
-            if key in data and isinstance(data[key], list):
-                setattr(spec, key, data[key])
-
-        # Tech stack dict
-        if "tech_stack" in data and isinstance(data["tech_stack"], dict):
-            spec.tech_stack = data["tech_stack"]
-
-        # Functional requirements
-        if "functional_requirements" in data:
-            spec.functional_requirements = [
-                FunctionalRequirement(**fr) if isinstance(fr, dict) else fr
-                for fr in data["functional_requirements"]
-            ]
-
-        # Milestones
-        if "milestones" in data:
-            spec.milestones = [
-                Milestone(**m) if isinstance(m, dict) else m
-                for m in data["milestones"]
-            ]
-
-        # Pass-through lists of dicts
-        for key in ("data_models", "api_endpoints"):
-            if key in data and isinstance(data[key], list):
-                setattr(spec, key, data[key])
-
-        return spec
+        return cls(
+            title=data.get("title", ""),
+            summary=data.get("summary", ""),
+            problem_statement=data.get("problem_statement", ""),
+            goals=data.get("goals", []),
+            target_users=data.get("target_users", ""),
+            user_stories=data.get("user_stories", []),
+            functional_requirements=data.get("functional_requirements", []),
+            non_functional_requirements=data.get("non_functional_requirements", []),
+            tech_stack=data.get("tech_stack", {}),
+            architecture_overview=data.get("architecture_overview", ""),
+            data_models=data.get("data_models", []),
+            api_endpoints=data.get("api_endpoints", []),
+            milestones=data.get("milestones", []),
+            constraints=data.get("constraints", []),
+            assumptions=data.get("assumptions", []),
+            open_questions=data.get("open_questions", []),
+        )
