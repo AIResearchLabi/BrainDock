@@ -26,9 +26,9 @@ class ClaudeCLIBackend:
         self.timeout = timeout
 
     def query(self, system_prompt: str, user_prompt: str) -> str:
-        full_prompt = f"{system_prompt}\n\n{user_prompt}"
-
-        cmd = ["claude", "-p", "--dangerously-skip-permissions"]
+        cmd = ["claude", "-p", "--output-format", "json", "--dangerously-skip-permissions"]
+        if system_prompt:
+            cmd.extend(["--system-prompt", system_prompt])
         if self.model:
             cmd.extend(["--model", self.model])
 
@@ -39,7 +39,7 @@ class ClaudeCLIBackend:
 
         result = subprocess.run(
             cmd,
-            input=full_prompt,
+            input=user_prompt,
             capture_output=True,
             text=True,
             timeout=self.timeout,
@@ -51,7 +51,18 @@ class ClaudeCLIBackend:
                 f"claude -p failed (exit {result.returncode}): {result.stderr}"
             )
 
-        return result.stdout.strip()
+        try:
+            parsed = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            # Fallback: return raw output if JSON parsing fails
+            return result.stdout.strip()
+
+        if parsed.get("is_error"):
+            raise RuntimeError(
+                f"claude -p returned error: {parsed.get('result', 'unknown error')}"
+            )
+
+        return parsed.get("result", "")
 
 
 class CallableBackend:
