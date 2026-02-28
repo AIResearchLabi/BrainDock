@@ -97,6 +97,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 self._api_send_chat(body)
             elif api_path == "/api/resume":
                 self._api_resume(body)
+            elif api_path == "/api/load":
+                self._api_load(body)
             else:
                 self._json_response({"error": "Not found"}, status=404)
         except Exception as e:
@@ -133,13 +135,13 @@ class DashboardHandler(SimpleHTTPRequestHandler):
     def _api_state(self):
         state = self.runner.get_state()
         if not state or (not state.get("_running") and not state.get("title")):
-            # Fall back to disk-based state
-            state = self._load_disk_state()
-            state["_running"] = False
-            state["_error"] = ""
-            state["_pending_questions"] = None
-            state["_pending_decisions"] = None
-            state["_pending_understanding"] = ""
+            state = {
+                "_running": False,
+                "_error": "",
+                "_pending_questions": None,
+                "_pending_decisions": None,
+                "_pending_understanding": "",
+            }
         self._json_response(state)
 
     def _api_runs(self):
@@ -203,6 +205,19 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             logger.warning("API /resume: could not resume %r", title)
             self._json_response({"error": f"Could not resume '{title}'"}, status=404)
 
+    def _api_load(self, body: dict):
+        title = body.get("title", "").strip()
+        if not title:
+            self._json_response({"error": "title is required"}, status=400)
+            return
+        logger.info("API /load: title=%r", title)
+        ok = self.runner.load(title)
+        if ok:
+            self._json_response({"ok": True, "title": title})
+        else:
+            logger.warning("API /load: could not load %r", title)
+            self._json_response({"error": f"Could not load '{title}'"}, status=404)
+
     # ── Helpers ───────────────────────────────────────────────────
 
     def _read_body(self) -> dict:
@@ -240,23 +255,6 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._json_response({"error": msg}, status=500)
         except Exception:
             pass
-
-    def _load_disk_state(self) -> dict:
-        """Load latest pipeline_state.json from disk (for viewing past runs)."""
-        # Scan output directory for the most recently modified state file
-        best = {}
-        if os.path.isdir(self.output_dir):
-            for entry in os.listdir(self.output_dir):
-                sp = os.path.join(self.output_dir, entry, "pipeline_state.json")
-                if os.path.isfile(sp):
-                    try:
-                        with open(sp) as f:
-                            data = json.load(f)
-                        if data.get("spec") and data["spec"].get("title"):
-                            best = data
-                    except (json.JSONDecodeError, KeyError):
-                        pass
-        return best
 
     # ── Static file serving ───────────────────────────────────────
 

@@ -194,6 +194,28 @@
     font-weight: 600;
   }
 
+  /* ─── Project Banner ─── */
+  .project-banner {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 24px;
+    flex-shrink: 0;
+  }
+
+  .project-banner-title {
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .project-banner-desc {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   /* ─── Tab 1: Project ─── */
   #tab-project { padding: 24px; gap: 20px; }
 
@@ -258,6 +280,7 @@
 
   .run-item-info { flex: 1; }
   .run-item-title { font-weight: 600; }
+  .run-item-desc { font-size: 12px; color: var(--text-dim); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 500px; }
   .run-item-meta { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
   .run-item-actions { display: flex; gap: 6px; }
 
@@ -889,6 +912,11 @@
   </button>
 </div>
 
+<div id="projectBanner" class="project-banner" style="display:none">
+  <div class="project-banner-title" id="bannerTitle"></div>
+  <div class="project-banner-desc" id="bannerDesc"></div>
+</div>
+
 <!-- Tab 1: Project -->
 <div class="tab-content active" id="tab-project">
   <!-- Start form (shown when idle) -->
@@ -1189,6 +1217,30 @@ async function resumeRun(title) {
   } catch (e) { alert('Failed: ' + e.message); }
 }
 
+// ─── Load Run (view-only) ───
+async function loadRun(title) {
+  try {
+    const r = await fetch(apiUrl('api/load'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    });
+    const ct = r.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) {
+      throw new Error('Server returned non-JSON response. Check that BrainDock dashboard is running on this port.');
+    }
+    const data = await r.json();
+    if (data.error) {
+      alert(data.error);
+    } else {
+      activityCursor = 0;
+      chatCursor = 0;
+      logsCursor = 0;
+      logsTotals = { calls: 0, input: 0, output: 0, time: 0 };
+    }
+  } catch (e) { alert('Failed: ' + e.message); }
+}
+
 // ─── Submit Answers ───
 async function submitAnswers() {
   const inputs = document.querySelectorAll('[data-qid]');
@@ -1241,17 +1293,21 @@ async function loadRuns() {
     if (runs.length > 0) {
       section.style.display = '';
       count.textContent = runs.length;
-      list.innerHTML = runs.map(r => `
+      list.innerHTML = runs.map(r => {
+        const safeTitle = esc(r.title).replace(/'/g, "\\'");
+        return `
         <div class="run-item">
           <div class="run-item-info">
             <div class="run-item-title">${esc(r.title)}</div>
+            <div class="run-item-desc">${esc((r.problem||'').substring(0,120))}</div>
             <div class="run-item-meta">${r.completed}/${r.total} tasks | Mode: ${esc(r.mode)}</div>
           </div>
           <div class="run-item-actions">
-            <button class="btn btn-secondary" onclick="resumeRun('${esc(r.title).replace(/'/g, "\\'")}')">Resume</button>
+            <button class="btn btn-secondary" onclick="loadRun('${safeTitle}')">Load</button>
+            <button class="btn" onclick="resumeRun('${safeTitle}')">Resume</button>
           </div>
-        </div>
-      `).join('');
+        </div>`;
+      }).join('');
     } else {
       section.style.display = 'none';
     }
@@ -1264,8 +1320,18 @@ function renderProjectTab(state) {
   const running = state._running;
   const hasState = !!(state.title || state.spec);
 
-  // Show/hide form
-  document.getElementById('startFormSection').style.display = running ? 'none' : '';
+  // Show/hide form — only show when idle and no state loaded
+  document.getElementById('startFormSection').style.display = (!running && !hasState) ? '' : 'none';
+
+  // Project banner — visible across all tabs when a project is active
+  const banner = document.getElementById('projectBanner');
+  if (state.title) {
+    banner.style.display = '';
+    document.getElementById('bannerTitle').textContent = state.title;
+    document.getElementById('bannerDesc').textContent = state.spec?.summary || state.problem || '';
+  } else {
+    banner.style.display = 'none';
+  }
 
   // Error banner
   const errorBanner = document.getElementById('errorBanner');

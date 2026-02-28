@@ -97,6 +97,29 @@ class PipelineRunner:
         except OSError as e:
             logger.warning("Failed to persist LLM logs: %s", e)
 
+    def load(self, title: str) -> bool:
+        """Load a previous run's state and history from disk (view-only, no pipeline thread)."""
+        slug = slugify(title)
+        run_dir = os.path.join(self.output_dir, slug)
+        state_path = os.path.join(run_dir, "pipeline_state.json")
+        if not os.path.isfile(state_path):
+            return False
+        try:
+            with open(state_path) as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return False
+        with self._lock:
+            self._state = PipelineState.from_dict(data)
+            self._running = False
+            self._error = ""
+            self._run_dir = run_dir
+            self._chat = []
+            self._activities = []
+            self._llm_logs = []
+        self._load_history(run_dir)
+        return True
+
     def _load_history(self, run_dir: str) -> None:
         """Load persisted chat, activities, and LLM logs from a run directory."""
         for attr, filename in [

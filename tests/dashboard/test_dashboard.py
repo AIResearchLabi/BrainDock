@@ -396,5 +396,77 @@ class TestGuidanceQueue(unittest.TestCase):
         self.assertEqual(chat["entries"][0]["text"], "hello")
 
 
+class TestPipelineRunnerLoad(unittest.TestCase):
+    """Tests for PipelineRunner.load() and clean slate behaviour."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+        self.runner = PipelineRunner(output_dir=self._tmpdir)
+        # Create a fake run on disk
+        self._run_dir = os.path.join(self._tmpdir, "my-project")
+        os.makedirs(self._run_dir)
+        self._state_data = {
+            "title": "My Project",
+            "problem": "Build something cool",
+            "current_mode": "execution",
+            "completed_tasks": ["t1"],
+            "failed_tasks": [],
+            "task_graph": {"tasks": [{"id": "t1"}, {"id": "t2"}]},
+        }
+        with open(os.path.join(self._run_dir, "pipeline_state.json"), "w") as f:
+            json.dump(self._state_data, f)
+        # Write some history files
+        with open(os.path.join(self._run_dir, "dashboard_chat.json"), "w") as f:
+            json.dump([{"ts": 1, "role": "system", "text": "hello"}], f)
+        with open(os.path.join(self._run_dir, "dashboard_activities.json"), "w") as f:
+            json.dump([{"ts": 1, "agent": "spec", "action": "started", "detail": "", "status": "info"}], f)
+        with open(os.path.join(self._run_dir, "dashboard_llm_logs.json"), "w") as f:
+            json.dump([{"ts": 1, "agent": "planner", "duration": 0.5}], f)
+
+    def tearDown(self):
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_load_sets_state_from_disk(self):
+        ok = self.runner.load("My Project")
+        self.assertTrue(ok)
+        state = self.runner.get_state()
+        self.assertEqual(state["title"], "My Project")
+        self.assertEqual(state["problem"], "Build something cool")
+        self.assertEqual(state["current_mode"], "execution")
+        self.assertEqual(state["completed_tasks"], ["t1"])
+
+    def test_load_restores_history(self):
+        ok = self.runner.load("My Project")
+        self.assertTrue(ok)
+        chat = self.runner.get_chat()
+        self.assertEqual(len(chat["entries"]), 1)
+        self.assertEqual(chat["entries"][0]["text"], "hello")
+        activities = self.runner.get_activities()
+        self.assertEqual(len(activities["entries"]), 1)
+        logs = self.runner.get_logs()
+        self.assertEqual(len(logs["entries"]), 1)
+
+    def test_load_not_running(self):
+        self.runner.load("My Project")
+        state = self.runner.get_state()
+        self.assertFalse(state["_running"])
+
+    def test_load_nonexistent_returns_false(self):
+        ok = self.runner.load("Nonexistent Project")
+        self.assertFalse(ok)
+
+    def test_load_corrupt_json_returns_false(self):
+        with open(os.path.join(self._run_dir, "pipeline_state.json"), "w") as f:
+            f.write("NOT JSON")
+        ok = self.runner.load("My Project")
+        self.assertFalse(ok)
+
+    def test_get_state_empty_on_fresh_start(self):
+        """Verify clean slate: fresh runner returns no title."""
+        state = self.runner.get_state()
+        self.assertFalse(state["_running"])
+        self.assertNotIn("title", state)
+
+
 if __name__ == "__main__":
     unittest.main()
