@@ -70,6 +70,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 elif api_path == "/api/logs":
                     since = int(params.get("since", ["0"])[0])
                     self._api_logs(since)
+                elif api_path == "/api/skills":
+                    self._api_skills()
                 else:
                     self._json_response({"error": "Not found"}, status=404)
             except Exception as e:
@@ -99,6 +101,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 self._api_resume(body)
             elif api_path == "/api/load":
                 self._api_load(body)
+            elif api_path == "/api/pause":
+                self._api_pause()
             else:
                 self._json_response({"error": "Not found"}, status=404)
         except Exception as e:
@@ -160,6 +164,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         data = self.runner.get_logs(since)
         self._json_response(data)
 
+    def _api_skills(self):
+        skills = self.runner.get_skills()
+        self._json_response({"skills": skills})
+
     def _api_start(self, body: dict):
         title = body.get("title", "").strip()
         problem = body.get("problem", "").strip()
@@ -204,6 +212,14 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         else:
             logger.warning("API /resume: could not resume %r", title)
             self._json_response({"error": f"Could not resume '{title}'"}, status=404)
+
+    def _api_pause(self):
+        logger.info("API /pause")
+        ok = self.runner.request_pause()
+        if ok:
+            self._json_response({"ok": True})
+        else:
+            self._json_response({"error": "No running pipeline to pause"}, status=409)
 
     def _api_load(self, body: dict):
         title = body.get("title", "").strip()

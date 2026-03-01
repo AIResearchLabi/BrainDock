@@ -20,6 +20,7 @@ _DIR = os.path.dirname(os.path.abspath(__file__))
 DEV_OPS = "dev_ops"
 EXEC_OPS = "exec_ops"
 BUSINESS_OPS = "business_ops"
+OUTREACH = "outreach"
 
 
 def _read_preamble(name: str) -> str:

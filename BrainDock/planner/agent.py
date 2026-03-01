@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from BrainDock.base_agent import BaseAgent
 from BrainDock.llm import LLMBackend
@@ -12,6 +13,42 @@ from .prompts import SYSTEM_PROMPT, PLAN_TASK_PROMPT
 
 # Plans with entropy above this threshold should trigger debate
 ENTROPY_THRESHOLD = 0.7
+
+# Unicode characters that commonly leak from LLM plan text into source code
+_UNICODE_REPLACEMENTS = {
+    "\u2192": "->",   # →
+    "\u2190": "<-",   # ←
+    "\u2194": "<->",  # ↔
+    "\u2022": "-",    # •
+    "\u2013": "-",    # –
+    "\u2014": "--",   # —
+    "\u2018": "'",    # '
+    "\u2019": "'",    # '
+    "\u201c": '"',    # "
+    "\u201d": '"',    # "
+    "\u2026": "...",  # …
+    "\u2713": "[x]",  # ✓
+    "\u2717": "[ ]",  # ✗
+    "\u00b7": ".",    # ·
+}
+
+_UNICODE_RE = re.compile("|".join(re.escape(k) for k in _UNICODE_REPLACEMENTS))
+
+
+def _sanitize_unicode(text: str) -> str:
+    """Replace problematic Unicode characters with ASCII equivalents."""
+    return _UNICODE_RE.sub(lambda m: _UNICODE_REPLACEMENTS[m.group()], text)
+
+
+def _sanitize_plan_text(data: dict) -> None:
+    """In-place sanitize Unicode in plan step descriptions and actions."""
+    for step in data.get("steps", []):
+        for key in ("description", "action", "expected_output"):
+            if key in step and isinstance(step[key], str):
+                step[key] = _sanitize_unicode(step[key])
+    for key in ("task_title",):
+        if key in data and isinstance(data[key], str):
+            data[key] = _sanitize_unicode(data[key])
 
 
 class PlannerAgent(BaseAgent):
@@ -65,6 +102,9 @@ class PlannerAgent(BaseAgent):
             task_title=task.get("title", ""),
         )
         data = self._llm_query_json(self._sys_prompt, prompt)
+        # Sanitize Unicode characters in step descriptions that could leak
+        # into source code (e.g., → ← • — etc.)
+        _sanitize_plan_text(data)
         return ActionPlan.from_dict(data)
 
     def needs_debate(self, plan: ActionPlan) -> bool:

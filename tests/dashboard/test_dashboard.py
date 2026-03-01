@@ -468,5 +468,94 @@ class TestPipelineRunnerLoad(unittest.TestCase):
         self.assertNotIn("title", state)
 
 
+# ── Tests: Pause/Resume ────────────────────────────────────────────────
+
+class TestPipelineRunnerPause(unittest.TestCase):
+    """Test the pause (stop event) mechanism on PipelineRunner."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+        self.runner = PipelineRunner(output_dir=self._tmpdir)
+
+    def tearDown(self):
+        with self.runner._lock:
+            self.runner._running = False
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_request_pause_sets_event(self):
+        with self.runner._lock:
+            self.runner._running = True
+        result = self.runner.request_pause()
+        self.assertTrue(result)
+        self.assertTrue(self.runner._stop_event.is_set())
+
+    def test_request_pause_when_not_running_returns_false(self):
+        result = self.runner.request_pause()
+        self.assertFalse(result)
+        self.assertFalse(self.runner._stop_event.is_set())
+
+    def test_check_stop_reflects_event(self):
+        self.assertFalse(self.runner._check_stop())
+        self.runner._stop_event.set()
+        self.assertTrue(self.runner._check_stop())
+
+    def test_start_clears_stop_event(self):
+        self.runner._stop_event.set()
+        # start() will clear the event and spawn a thread
+        self.runner.start("test", "problem")
+        self.assertFalse(self.runner._stop_event.is_set())
+
+
+class TestPipelineRunnerGetSkills(unittest.TestCase):
+    """Test the get_skills() method on PipelineRunner."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+        self.runner = PipelineRunner(output_dir=self._tmpdir)
+
+    def tearDown(self):
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_get_skills_empty(self):
+        """Returns empty list when no skill bank file exists."""
+        skills = self.runner.get_skills()
+        self.assertEqual(skills, [])
+
+    def test_get_skills_with_data(self):
+        """Loads skills from a skills.json file."""
+        skill_dir = os.path.join(self._tmpdir, "skill_bank")
+        os.makedirs(skill_dir)
+        with open(os.path.join(skill_dir, "skills.json"), "w") as f:
+            json.dump({"skills": [
+                {
+                    "id": "skill_1",
+                    "name": "Test Skill",
+                    "description": "A test skill",
+                    "tags": ["test", "demo"],
+                    "pattern": "do the thing",
+                    "example_code": "",
+                    "source_task": "t1",
+                    "usage_count": 3,
+                },
+                {
+                    "id": "skill_2",
+                    "name": "Another Skill",
+                    "description": "Another one",
+                    "tags": ["other"],
+                    "pattern": "",
+                    "example_code": "",
+                    "source_task": "",
+                    "usage_count": 0,
+                },
+            ]}, f)
+        skills = self.runner.get_skills()
+        self.assertEqual(len(skills), 2)
+        self.assertEqual(skills[0]["id"], "skill_1")
+        self.assertEqual(skills[0]["name"], "Test Skill")
+        self.assertEqual(skills[0]["tags"], ["test", "demo"])
+        self.assertEqual(skills[0]["usage_count"], 3)
+        self.assertEqual(skills[1]["id"], "skill_2")
+
+
 if __name__ == "__main__":
     unittest.main()

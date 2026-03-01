@@ -55,6 +55,9 @@ class PipelineRunner:
         # User guidance queue (drained by pipeline agents at checkpoints)
         self._pending_guidance: list[str] = []
 
+        # Stop event for pause support
+        self._stop_event = threading.Event()
+
         # Question/answer synchronization
         self._pending_questions: list[dict] | None = None
         self._pending_decisions: list[dict] | None = None
@@ -154,6 +157,7 @@ class PipelineRunner:
             self._state = None
             self._pending_questions = None
             self._answer_event.clear()
+            self._stop_event.clear()
 
         # Resolve and store the run directory
         slug = slugify(title)
@@ -202,6 +206,21 @@ class PipelineRunner:
 
         return self.start(title, problem)
 
+    def request_pause(self) -> bool:
+        """Request the running pipeline to pause at the next task boundary.
+
+        Returns True if a running pipeline was signalled, False otherwise.
+        """
+        with self._lock:
+            if not self._running:
+                return False
+            self._stop_event.set()
+            return True
+
+    def _check_stop(self) -> bool:
+        """Return whether a pause has been requested. Thread-safe."""
+        return self._stop_event.is_set()
+
     def _run_pipeline(self, title: str, problem: str) -> None:
         """Target for the daemon thread — runs the orchestrator."""
         try:
@@ -216,6 +235,7 @@ class PipelineRunner:
                 on_state=self._on_state_change,
                 on_llm_log=self._on_llm_log,
                 check_guidance=self.drain_guidance,
+                check_stop=self._check_stop,
             )
             with self._lock:
                 self._state = state
@@ -394,10 +414,69 @@ class PipelineRunner:
             return messages
 
     def send_chat(self, message: str) -> None:
-        """Add a user message to the chat log and queue for pipeline guidance."""
+        """Add a user message to the chat log and queue for pipeline guidance.
+
+        If the message looks like a status query, auto-respond with current
+        pipeline status so the user doesn't have to wait for the next
+        pipeline checkpoint.
+        """
         self._add_chat("user", message)
+
+        # Check if this is a status query
+        _lower = message.lower().strip()
+        _status_markers = (
+            "status", "progress", "what is", "how is", "where are",
+            "current task", "which task", "update",
+        )
+        if any(marker in _lower for marker in _status_markers):
+            self._auto_status_reply()
+
         with self._lock:
             self._pending_guidance.append(message)
+
+    def _auto_status_reply(self) -> None:
+        """Generate and post an automatic status reply to the chat."""
+        with self._lock:
+            state = self._state
+            running = self._running
+            error = self._error
+
+        if not state:
+            self._add_chat("system", "No pipeline is currently loaded.")
+            return
+
+        mode = state.current_mode if hasattr(state, 'current_mode') else "unknown"
+        completed = state.completed_tasks if hasattr(state, 'completed_tasks') else []
+        failed = state.failed_tasks if hasattr(state, 'failed_tasks') else []
+        total = 0
+        if hasattr(state, 'task_graph') and state.task_graph:
+            total = len(state.task_graph.get("tasks", []))
+
+        status_parts = []
+        if running:
+            status_parts.append("Pipeline is RUNNING")
+        else:
+            status_parts.append("Pipeline is IDLE")
+
+        status_parts.append(f"Current mode: {mode}")
+        status_parts.append(f"Tasks: {len(completed)}/{total} completed, {len(failed)} failed")
+
+        if completed:
+            status_parts.append(f"Completed: {', '.join(completed[-5:])}")
+            if len(completed) > 5:
+                status_parts[-1] += f" (+{len(completed) - 5} more)"
+        if failed:
+            status_parts.append(f"Failed: {', '.join(failed)}")
+        if error:
+            status_parts.append(f"Last error: {error}")
+
+        # Token budget info
+        token_usage = state.token_usage if hasattr(state, 'token_usage') and state.token_usage else None
+        if token_usage and isinstance(token_usage, dict):
+            pct = token_usage.get("global_pct", 0)
+            status_parts.append(f"Token budget: {pct:.0%} used")
+
+        self._add_chat("system", "\n".join(status_parts))
 
     def _add_chat(self, role: str, text: str, questions: list[dict] | None = None) -> None:
         entry: dict[str, Any] = {"ts": time.time(), "role": role, "text": text}
@@ -408,6 +487,13 @@ class PipelineRunner:
             self._persist_chat()
 
         logger.debug("[Chat] role=%s text=%s", role, text[:80] if text else "(empty)")
+
+    def get_skills(self) -> list[dict]:
+        """Load skills from the global skill bank."""
+        from BrainDock.skill_bank.storage import load_skill_bank
+        path = os.path.join(self.output_dir, "skill_bank", "skills.json")
+        bank = load_skill_bank(path)
+        return [s.to_dict() for s in bank.skills]
 
     def list_runs(self) -> list[dict]:
         """Delegate to OrchestratorAgent.list_runs()."""

@@ -6,7 +6,11 @@ graph, you produce a detailed step-by-step action plan. Your plans are concrete,
 actionable, and include confidence metrics.
 
 IMPORTANT: Always respond in valid JSON format as specified in each prompt. \
-Do not include any text outside the JSON object."""
+Do not include any text outside the JSON object.
+
+IMPORTANT: In step descriptions and actions, use ONLY ASCII characters. \
+Do NOT use Unicode arrows (→), bullets (•), em-dashes (—), or smart quotes. \
+Use -> instead of →, - instead of •, -- instead of —."""
 
 
 PLAN_TASK_PROMPT = """\

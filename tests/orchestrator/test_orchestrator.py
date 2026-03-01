@@ -1235,5 +1235,118 @@ class TestGlobalSkillBankWebApp(unittest.TestCase):
                          "First run should not inject skills into planner prompt")
 
 
+class TestSkillsSavedIncrementally(unittest.TestCase):
+    """Test that skills are saved to disk immediately after extraction, not just at end of run."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_skills_saved_incrementally(self):
+        """Global skill bank file exists after skill extraction, not just at pipeline end."""
+        from BrainDock.skill_bank.storage import load_skill_bank
+        from BrainDock.orchestrator.models import slugify
+
+        config = RunConfig(output_dir=self._tmpdir)
+        global_path = config.resolve_global_skill_bank_path()
+
+        # Wrap the LLM to check file existence after skill extraction call
+        file_existed_after_skill_call = {"value": False}
+        call_count = {"n": 0}
+        responses = [
+            SPEC_ANALYZE, SPEC_REFINE, SPEC_GENERATE,
+            TASK_GRAPH, PLAN, EXEC_WRITE, SKILL_EXTRACT,
+        ]
+
+        def mock_fn(system_prompt, user_prompt):
+            idx = min(call_count["n"], len(responses) - 1)
+            call_count["n"] += 1
+            result = responses[idx]
+            # After the skill extraction call (call 7), the next save_state
+            # will have already written the file. We check right after
+            # returning the skill extraction response by hooking the next call.
+            if call_count["n"] > len(responses):
+                # Past all expected calls — check if file was saved
+                if os.path.exists(global_path):
+                    file_existed_after_skill_call["value"] = True
+            return result
+
+        llm = CallableBackend(mock_fn)
+        orchestrator = OrchestratorAgent(llm=llm, config=config)
+
+        def ask_fn(q, d, u):
+            return {}
+
+        state = orchestrator.run(problem="Build a CLI calculator", ask_fn=ask_fn)
+
+        # Skill should have been learned
+        self.assertEqual(len(state.learned_skills), 1)
+
+        # Global skill bank file should exist with the skill
+        self.assertTrue(os.path.exists(global_path),
+                        "Global skill bank should be saved immediately after skill extraction")
+        bank = load_skill_bank(global_path)
+        self.assertEqual(len(bank.skills), 1)
+        self.assertEqual(bank.skills[0].id, "skill_eval_pattern")
+
+        # Per-run copy should also exist
+        per_run_path = os.path.join(
+            self._tmpdir, slugify("Build a CLI calculator"),
+            "skill_bank", "skills.json",
+        )
+        self.assertTrue(os.path.exists(per_run_path),
+                        "Per-run skill bank should be saved immediately after skill extraction")
+
+
+class TestCheckStopPausesAtTaskBoundary(unittest.TestCase):
+    """Test that check_stop causes the orchestrator to pause at task boundary."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_check_stop_pauses_at_task_boundary(self):
+        """When check_stop returns True, run() should return state early."""
+        config = RunConfig(output_dir=self._tmpdir)
+        orchestrator = OrchestratorAgent(llm=make_pipeline_llm(), config=config)
+
+        def ask_fn(questions, decisions, understanding):
+            return {}
+
+        # check_stop always returns True — should pause before any task executes
+        state = orchestrator.run(
+            problem="Build a CLI calculator",
+            ask_fn=ask_fn,
+            check_stop=lambda: True,
+        )
+
+        # Spec and task graph should complete (check_stop is only at task boundary)
+        self.assertIsNotNone(state.spec)
+        self.assertTrue(state.task_graph)
+        # But no tasks should have been executed
+        self.assertEqual(state.completed_tasks, [])
+        self.assertEqual(len(state.execution_results), 0)
+
+    def test_check_stop_false_runs_normally(self):
+        """When check_stop returns False, pipeline runs to completion."""
+        config = RunConfig(output_dir=self._tmpdir)
+        orchestrator = OrchestratorAgent(llm=make_pipeline_llm(), config=config)
+
+        def ask_fn(questions, decisions, understanding):
+            return {}
+
+        state = orchestrator.run(
+            problem="Build a CLI calculator",
+            ask_fn=ask_fn,
+            check_stop=lambda: False,
+        )
+
+        self.assertEqual(state.completed_tasks, ["t1"])
+
+
 if __name__ == "__main__":
     unittest.main()

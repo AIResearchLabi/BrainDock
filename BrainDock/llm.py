@@ -162,6 +162,24 @@ def extract_json(text: str) -> dict:
         except json.JSONDecodeError:
             pass
 
+    # Try 4: detect "already done" / summary responses and wrap as skip action
+    # This handles cases where the LLM returns a prose summary instead of JSON
+    # (e.g., "All steps are complete. Here's a summary...")
+    _lower = text[:200].lower()
+    _already_done_markers = (
+        "already", "complete", "all steps", "already implemented",
+        "already exist", "no changes needed", "nothing to do",
+    )
+    if any(marker in _lower for marker in _already_done_markers):
+        return {
+            "action_type": "skip",
+            "step_id": "",
+            "content": text[:500],
+            "file_path": "",
+            "verification": "LLM indicated work was already complete",
+            "_auto_skip": True,
+        }
+
     raise ValueError(
         f"Could not extract valid JSON from LLM response. "
         f"Response starts with: {text[:200]!r}"
@@ -227,6 +245,22 @@ def extract_json_or_list(text: str) -> dict | list:
                 return result
         except json.JSONDecodeError:
             continue
+
+    # Detect "already done" / summary responses and wrap as skip action list
+    _lower = text[:200].lower()
+    _already_done_markers = (
+        "already", "complete", "all steps", "already implemented",
+        "already exist", "no changes needed", "nothing to do",
+    )
+    if any(marker in _lower for marker in _already_done_markers):
+        return [{
+            "action_type": "skip",
+            "step_id": "",
+            "content": text[:500],
+            "file_path": "",
+            "verification": "LLM indicated work was already complete",
+            "_auto_skip": True,
+        }]
 
     raise ValueError(
         f"Could not extract valid JSON from LLM response. "

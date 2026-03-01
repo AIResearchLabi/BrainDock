@@ -34,6 +34,11 @@ PRIORITY_FILES = [
 MAX_SNAPSHOT_BYTES = 50_000
 MAX_FILE_BYTES = 8_000
 
+# Cache to avoid re-reading unchanged files across scans within a session.
+# Maps (abs_path, mtime, size) -> content string.
+_file_content_cache: dict[tuple[str, float, int], str] = {}
+_CACHE_MAX_ENTRIES = 200
+
 
 class ContextProfile:
     """Context size profiles for different agent types."""
@@ -126,7 +131,11 @@ def _build_tree(project_dir: str) -> tuple[str, list[tuple[str, float, int]]]:
     return "\n".join(lines), files_meta
 
 
-def scan_project(project_dir: str, profile: str = "full") -> ProjectSnapshot:
+def scan_project(
+    project_dir: str,
+    profile: str = "full",
+    relevant_paths: list[str] | None = None,
+) -> ProjectSnapshot:
     """Scan a project directory and return a snapshot for agent context.
 
     Reads priority files first, then most recently modified files,
@@ -136,6 +145,10 @@ def scan_project(project_dir: str, profile: str = "full") -> ProjectSnapshot:
         project_dir: Path to the project directory.
         profile: Context size profile — "full", "medium", "light", or "minimal".
             Defaults to "full" for backward compatibility.
+        relevant_paths: Optional list of path substrings to prioritize.
+            Files matching these substrings are read before other files.
+            Useful for focusing context on task-relevant directories
+            (e.g., ["outreach/", "tests/outreach/"]).
 
     Returns:
         ProjectSnapshot with file tree and key file contents.
@@ -150,15 +163,19 @@ def scan_project(project_dir: str, profile: str = "full") -> ProjectSnapshot:
     total_files = len(files_meta)
     total_size = sum(size for _, _, size in files_meta)
 
-    # Build reading order: priority files first, then by most recent mtime
+    # Build reading order: priority files first, then relevant paths,
+    # then by most recent mtime
     priority_set = set(PRIORITY_FILES)
     priority_list = []
+    relevant_list = []
     other_list = []
 
     for rel_path, mtime, size in files_meta:
         basename = os.path.basename(rel_path)
         if basename in priority_set:
             priority_list.append((rel_path, mtime, size))
+        elif relevant_paths and any(rp in rel_path for rp in relevant_paths):
+            relevant_list.append((rel_path, mtime, size))
         else:
             other_list.append((rel_path, mtime, size))
 
@@ -166,10 +183,13 @@ def scan_project(project_dir: str, profile: str = "full") -> ProjectSnapshot:
     priority_order = {name: i for i, name in enumerate(PRIORITY_FILES)}
     priority_list.sort(key=lambda x: priority_order.get(os.path.basename(x[0]), 999))
 
+    # Sort relevant files by most recently modified
+    relevant_list.sort(key=lambda x: x[1], reverse=True)
+
     # Sort other files by most recently modified
     other_list.sort(key=lambda x: x[1], reverse=True)
 
-    read_order = priority_list + other_list
+    read_order = priority_list + relevant_list + other_list
 
     # Read files within budget
     key_contents: dict[str, str] = {}
@@ -187,7 +207,17 @@ def scan_project(project_dir: str, profile: str = "full") -> ProjectSnapshot:
 
         full_path = os.path.join(project_dir, rel_path)
         try:
-            content = Path(full_path).read_text(errors="replace")
+            stat = os.stat(full_path)
+            cache_key = (os.path.abspath(full_path), stat.st_mtime, stat.st_size)
+            if cache_key in _file_content_cache:
+                content = _file_content_cache[cache_key]
+            else:
+                content = Path(full_path).read_text(errors="replace")
+                # Evict oldest entries if cache is full
+                if len(_file_content_cache) >= _CACHE_MAX_ENTRIES:
+                    oldest = next(iter(_file_content_cache))
+                    del _file_content_cache[oldest]
+                _file_content_cache[cache_key] = content
             content_bytes = len(content.encode("utf-8", errors="replace"))
             if content_bytes > file_budget:
                 content = content[:file_budget] + "\n... (truncated)"

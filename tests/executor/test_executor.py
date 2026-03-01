@@ -6,6 +6,7 @@ import sys
 import tempfile
 import shutil
 import unittest
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 
@@ -639,6 +640,440 @@ class TestGuidanceIntegration(unittest.TestCase):
         self.assertTrue(len(prompts_seen) >= 3)
         # The continuation prompt includes session transcript with guidance entry
         self.assertIn("user_message", prompts_seen[2])
+
+
+# ── Pre-write Validation Tests ────────────────────────────────────────
+
+from BrainDock.executor.sandbox import (
+    _looks_like_description,
+    _looks_like_shell_command,
+    _validate_source_content,
+    scan_for_corrupted_files,
+)
+
+
+class TestLooksLikeDescription(unittest.TestCase):
+    def test_normal_code_is_not_description(self):
+        self.assertFalse(_looks_like_description("class User:\n    pass\n"))
+
+    def test_empty_is_not_description(self):
+        self.assertFalse(_looks_like_description(""))
+
+    def test_wrote_prefix_is_description(self):
+        self.assertTrue(_looks_like_description(
+            "Wrote complete Python module with ConfigError exception and load_config function."
+        ))
+
+    def test_updated_prefix_is_description(self):
+        self.assertTrue(_looks_like_description(
+            "Updated load_config() to accept optional config_path parameter."
+        ))
+
+    def test_already_exists_is_description(self):
+        self.assertTrue(_looks_like_description(
+            "Already exists with 11 test methods across 6 test classes."
+        ))
+
+    def test_wrapped_prefix_is_description(self):
+        self.assertTrue(_looks_like_description(
+            "Wrapped from playwright.sync_api import sync_playwright in try/except."
+        ))
+
+    def test_single_line_prose_is_description(self):
+        self.assertTrue(_looks_like_description(
+            "This module handles configuration loading and validation for the application"
+        ))
+
+    def test_short_content_is_not_description(self):
+        self.assertFalse(_looks_like_description("pass"))
+
+    def test_comment_only_file_is_not_description(self):
+        self.assertFalse(_looks_like_description("# This is a comment\n"))
+
+    def test_init_py_empty_not_description(self):
+        self.assertFalse(_looks_like_description(""))
+
+
+class TestLooksLikeShellCommand(unittest.TestCase):
+    def test_cd_and_python(self):
+        self.assertTrue(_looks_like_shell_command(
+            "cd /some/path && python -m mypackage"
+        ))
+
+    def test_python_m(self):
+        self.assertTrue(_looks_like_shell_command("python -m unittest discover -s tests -v"))
+
+    def test_npm_install(self):
+        self.assertTrue(_looks_like_shell_command("npm install && npm run build"))
+
+    def test_pip_install(self):
+        self.assertTrue(_looks_like_shell_command("pip install -r requirements.txt"))
+
+    def test_make(self):
+        self.assertTrue(_looks_like_shell_command("make test"))
+
+    def test_description_not_shell(self):
+        self.assertFalse(_looks_like_shell_command(
+            "Wrote a shell script that checks the database connection."
+        ))
+
+    def test_created_prefix_not_shell(self):
+        self.assertFalse(_looks_like_shell_command(
+            "Created the main.py file with the calculator implementation"
+        ))
+
+    def test_empty(self):
+        self.assertFalse(_looks_like_shell_command(""))
+
+    def test_shell_command_not_blocked_by_combined_guard(self):
+        """Shell commands should not be blocked even if they look like descriptions."""
+        cmd = "cd /home/user/project && python -m mypackage.module"
+        # The old guard would block this; combined guard should not
+        self.assertTrue(
+            _looks_like_shell_command(cmd) or not _looks_like_description(cmd)
+        )
+
+
+class TestValidateSourceContent(unittest.TestCase):
+    def test_valid_python(self):
+        ok, err = _validate_source_content("app.py", "print('hello')\n")
+        self.assertTrue(ok)
+        self.assertEqual(err, "")
+
+    def test_description_rejected(self):
+        ok, err = _validate_source_content(
+            "config.py",
+            "Wrote a complete Python module with dataclass definitions."
+        )
+        self.assertFalse(ok)
+        self.assertIn("description", err.lower())
+
+    def test_syntax_error_detected(self):
+        ok, err = _validate_source_content("bad.py", "def foo(:\n    pass\n")
+        self.assertFalse(ok)
+        self.assertIn("syntax", err.lower())
+
+    def test_non_code_files_pass(self):
+        ok, _ = _validate_source_content("readme.md", "Wrote a description")
+        self.assertTrue(ok)
+
+    def test_valid_empty_init(self):
+        ok, _ = _validate_source_content("__init__.py", "")
+        self.assertTrue(ok)
+
+    def test_json_file_not_validated(self):
+        ok, _ = _validate_source_content("data.json", '{"key": "value"}')
+        self.assertTrue(ok)
+
+
+class TestWriteFileSafeValidation(unittest.TestCase):
+    def test_rejects_description_content(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            success, msg = write_file_safe(
+                "config.py",
+                "Wrote complete Python module with ConfigError exception.",
+                tmpdir,
+            )
+            self.assertFalse(success)
+            self.assertIn("description", msg.lower())
+            # File should NOT be created
+            self.assertFalse(os.path.exists(os.path.join(tmpdir, "config.py")))
+
+    def test_accepts_valid_code(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            success, msg = write_file_safe(
+                "app.py",
+                "import sys\n\ndef main():\n    print('hello')\n",
+                tmpdir,
+            )
+            self.assertTrue(success)
+
+    def test_rejects_python_syntax_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            success, msg = write_file_safe(
+                "bad.py",
+                "def foo(:\n    pass\n",
+                tmpdir,
+            )
+            self.assertFalse(success)
+            self.assertIn("syntax", msg.lower())
+
+
+class TestScanForCorruptedFiles(unittest.TestCase):
+    def test_finds_corrupted_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a corrupted file
+            bad = Path(tmpdir) / "config.py"
+            bad.write_text("Wrote complete Python module with dataclasses.")
+            # Create a good file
+            good = Path(tmpdir) / "app.py"
+            good.write_text("import sys\nprint('hello')\n")
+
+            corrupted = scan_for_corrupted_files(tmpdir)
+            self.assertEqual(len(corrupted), 1)
+            self.assertEqual(corrupted[0]["path"], "config.py")
+
+    def test_empty_project(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            corrupted = scan_for_corrupted_files(tmpdir)
+            self.assertEqual(corrupted, [])
+
+    def test_skips_empty_init_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            init = Path(tmpdir) / "__init__.py"
+            init.write_text("")
+            corrupted = scan_for_corrupted_files(tmpdir)
+            self.assertEqual(corrupted, [])
+
+    def test_skips_pycache(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir) / "__pycache__"
+            cache_dir.mkdir()
+            bad = cache_dir / "module.cpython-311.pyc"
+            bad.write_text("Updated the module to use new API.")
+            # .pyc not in code_extensions so it's skipped
+            corrupted = scan_for_corrupted_files(tmpdir)
+            self.assertEqual(corrupted, [])
+
+
+# ── Step-Level Validation Retry Tests ─────────────────────────────────
+
+class TestValidationRetry(unittest.TestCase):
+    """Test that validation failures trigger a step-level LLM retry."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_retry_on_description_content(self):
+        """When LLM returns a description, executor retries and uses the good response."""
+        call_count = {"n": 0}
+
+        def mock_fn(system_prompt, user_prompt):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                # First call: returns description instead of code (in a batch)
+                return json.dumps([{
+                    "step_id": "s1",
+                    "action_type": "write_file",
+                    "file_path": "config.py",
+                    "content": "Wrote complete Python module with ConfigError exception.",
+                    "verification": "",
+                }])
+            else:
+                # Retry call: returns actual code
+                return json.dumps({
+                    "step_id": "s1",
+                    "action_type": "write_file",
+                    "file_path": "config.py",
+                    "content": "class ConfigError(Exception):\n    pass\n",
+                    "verification": "",
+                })
+
+        agent = ExecutorAgent(llm=CallableBackend(mock_fn))
+        plan = {
+            "task_id": "t1",
+            "steps": [{"id": "s1", "tool": "write_file"}],
+        }
+        result = agent.execute(plan, project_dir=self._tmpdir)
+        self.assertTrue(result.success)
+        # File should contain actual code
+        content = (Path(self._tmpdir) / "config.py").read_text()
+        self.assertIn("class ConfigError", content)
+        # Should have made 2 LLM calls (initial batch + retry)
+        self.assertEqual(call_count["n"], 2)
+
+    def test_no_retry_on_normal_failure(self):
+        """Normal failures (e.g. command exit code 1) should NOT trigger retry."""
+        call_count = {"n": 0}
+
+        def mock_fn(system_prompt, user_prompt):
+            call_count["n"] += 1
+            return json.dumps([{
+                "step_id": "s1",
+                "action_type": "run_command",
+                "file_path": "",
+                "content": "exit 1",
+                "verification": "",
+            }])
+
+        agent = ExecutorAgent(llm=CallableBackend(mock_fn))
+        plan = {
+            "task_id": "t1",
+            "steps": [{"id": "s1", "tool": "run_command"}],
+        }
+        result = agent.execute(plan, project_dir=self._tmpdir)
+        self.assertFalse(result.success)
+        # Should NOT retry — only 1 LLM call
+        self.assertEqual(call_count["n"], 1)
+
+    def test_retry_fails_both_times(self):
+        """If retry also returns a description, step fails."""
+        def mock_fn(system_prompt, user_prompt):
+            return json.dumps([{
+                "step_id": "s1",
+                "action_type": "write_file",
+                "file_path": "bad.py",
+                "content": "Updated the module to handle errors gracefully.",
+                "verification": "",
+            }])
+
+        agent = ExecutorAgent(llm=CallableBackend(mock_fn))
+        plan = {
+            "task_id": "t1",
+            "steps": [{"id": "s1", "tool": "write_file"}],
+        }
+        result = agent.execute(plan, project_dir=self._tmpdir)
+        self.assertFalse(result.success)
+        # File should NOT exist
+        self.assertFalse(os.path.exists(os.path.join(self._tmpdir, "bad.py")))
+
+    def test_description_in_run_command_detected(self):
+        """Description content in run_command action should be caught."""
+        def mock_fn(system_prompt, user_prompt):
+            return json.dumps([{
+                "step_id": "s1",
+                "action_type": "run_command",
+                "file_path": "",
+                "content": "Wrote a shell script that checks the database connection.",
+                "verification": "",
+            }])
+
+        agent = ExecutorAgent(llm=CallableBackend(mock_fn))
+        plan = {
+            "task_id": "t1",
+            "steps": [{"id": "s1", "tool": "run_command"}],
+        }
+        result = agent.execute(plan, project_dir=self._tmpdir)
+        self.assertFalse(result.success)
+        self.assertIn("description", result.outcomes[0].error.lower())
+
+    def test_is_validation_error(self):
+        """_is_validation_error detects validation-specific error messages."""
+        self.assertTrue(ExecutorAgent._is_validation_error(
+            "Content for config.py appears to be a natural-language description"
+        ))
+        self.assertTrue(ExecutorAgent._is_validation_error(
+            "Python syntax error in config.py: invalid syntax (line 1)"
+        ))
+        self.assertFalse(ExecutorAgent._is_validation_error(
+            "Command failed: exit code 1"
+        ))
+        self.assertFalse(ExecutorAgent._is_validation_error(""))
+
+
+# ── Controller Reset Per Task Tests ──────────────────────────────────
+
+from BrainDock.controller.agent import ControllerAgent
+from BrainDock.controller.models import ControllerState, GateThresholds
+
+
+class TestControllerResetForTask(unittest.TestCase):
+    """Test that controller failure counters reset per task."""
+
+    def test_reset_clears_counters(self):
+        state = ControllerState(failure_count=5, reflection_count=3, debate_count=2)
+        state.reset_for_task()
+        self.assertEqual(state.failure_count, 0)
+        self.assertEqual(state.reflection_count, 0)
+        self.assertEqual(state.debate_count, 0)
+
+    def test_reset_preserves_gate_history(self):
+        state = ControllerState()
+        from BrainDock.controller.models import GateResult
+        state.record_gate(GateResult(gate_name="test", passed=False, action="reflect"))
+        self.assertEqual(len(state.gate_history), 1)
+        state.reset_for_task()
+        # History preserved
+        self.assertEqual(len(state.gate_history), 1)
+        # But counter reset
+        self.assertEqual(state.failure_count, 0)
+
+    def test_controller_reset_for_task(self):
+        controller = ControllerAgent(thresholds=GateThresholds(max_failures=2))
+        # Simulate a failed task
+        controller.check_execution_gate({"success": False})
+        controller.check_execution_gate({"success": False})
+        self.assertEqual(controller.state.failure_count, 2)
+        # Reset for new task
+        controller.reset_for_task()
+        self.assertEqual(controller.state.failure_count, 0)
+        # New task should be able to fail again without aborting
+        result = controller.check_execution_gate({"success": False})
+        self.assertEqual(result.action, "reflect")
+        self.assertNotEqual(result.action, "abort")
+
+    def test_no_cascade_across_tasks(self):
+        """After reset, a new task gets a fresh failure budget."""
+        controller = ControllerAgent(thresholds=GateThresholds(max_failures=2))
+        # Task 1: 3 failures — first 2 return reflect, 3rd returns abort
+        controller.check_execution_gate({"success": False})  # reflect, count→1
+        controller.check_execution_gate({"success": False})  # reflect, count→2
+        result = controller.check_execution_gate({"success": False})  # abort, count=2 >= 2
+        self.assertEqual(result.action, "abort")
+
+        # Task 2: reset and try again
+        controller.reset_for_task()
+        result = controller.check_execution_gate({"success": False})
+        # Should be "reflect", not "abort" — counter was reset
+        self.assertEqual(result.action, "reflect")
+
+
+class TestExecutorJsonParseFailureGraceful(unittest.TestCase):
+    """Test that executor handles LLM JSON parse failures gracefully."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_batch_already_done_response_handled_as_skip(self):
+        """When LLM returns 'already done' prose, executor treats it as a skip
+        (success) instead of a hard failure."""
+        def already_done_llm(system_prompt, user_prompt):
+            return "All steps are completed successfully. No JSON here."
+
+        executor = ExecutorAgent(llm=CallableBackend(already_done_llm))
+        plan = {
+            "task_id": "t1",
+            "steps": [
+                {"id": "s1", "action": "Write file", "tool": "write_file"},
+                {"id": "s2", "action": "Write file", "tool": "write_file"},
+            ],
+        }
+        # Should NOT raise — auto-skip detects "completed" in response
+        result = executor.execute(plan, project_dir=self._tmpdir)
+        self.assertTrue(result.success)
+
+    def test_batch_truly_bad_json_returns_failed_outcomes(self):
+        """When LLM returns genuinely unparseable non-JSON with no 'already done'
+        markers, returns failed outcomes."""
+        def bad_llm(system_prompt, user_prompt):
+            return "xyz random gibberish with no recognizable pattern 12345"
+
+        executor = ExecutorAgent(llm=CallableBackend(bad_llm))
+        plan = {
+            "task_id": "t1",
+            "steps": [
+                {"id": "s1", "action": "Write file", "tool": "write_file"},
+            ],
+        }
+        result = executor.execute(plan, project_dir=self._tmpdir)
+        self.assertFalse(result.success)
+
+    def test_single_step_already_done_handled_as_skip(self):
+        """When LLM returns 'already done' prose for execute_step, treats as skip."""
+        def already_done_llm(system_prompt, user_prompt):
+            return "I completed the step. Everything is done."
+
+        executor = ExecutorAgent(llm=CallableBackend(already_done_llm))
+        step = {"id": "s1", "action": "Write file", "tool": "write_file"}
+        # Should NOT raise — auto-skip detects "complete" in response
+        outcome = executor.execute_step(step, self._tmpdir, [])
+        self.assertTrue(outcome.success)
 
 
 if __name__ == "__main__":

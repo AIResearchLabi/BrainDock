@@ -13,9 +13,10 @@ from .prompts import (
     EXECUTE_STEP_PROMPT,
     EXECUTE_BATCH_PROMPT,
     EXECUTE_CONTINUATION_PROMPT,
+    RETRY_VALIDATION_PROMPT,
     VERIFY_STEP_PROMPT,
 )
-from .sandbox import run_sandboxed, write_file_safe, read_file_safe
+from .sandbox import run_sandboxed, write_file_safe, read_file_safe, _looks_like_description, _looks_like_shell_command
 
 
 class _ExecutionSession:
@@ -26,9 +27,24 @@ class _ExecutionSession:
         self._char_count: int = 0
         self._limit = session_token_limit
         self._compressed_summary: str = ""
+        # Track files modified during this task for context diff mode
+        self._modified_files: set[str] = set()
+
+    def record_modified_file(self, file_path: str) -> None:
+        """Record that a file was written/modified in this session."""
+        if file_path:
+            self._modified_files.add(file_path)
+
+    @property
+    def modified_files(self) -> set[str]:
+        return self._modified_files
 
     def add_outcome(self, step_id: str, action_type: str, success: bool, output_snippet: str):
-        entry = f"[{step_id}] {action_type} \u2192 {'OK' if success else 'FAIL'}: {output_snippet[:200]}"
+        # Truncate output aggressively — successful steps need minimal context,
+        # only failed steps need enough detail for debugging
+        max_snippet = 50 if success else 150
+        status = "OK" if success else "FAIL"
+        entry = f"[{step_id}] {action_type} -> {status}: {output_snippet[:max_snippet]}"
         self._entries.append(entry)
         self._char_count += len(entry)
 
@@ -115,7 +131,7 @@ class ExecutorAgent(BaseAgent):
                 if content is not None:
                     edit_file_context = (
                         f"Current content of {target_path}:\n"
-                        f"---\n{content[:6000]}\n---"
+                        f"---\n{content[:4000]}\n---"
                     )
 
         prompt = EXECUTE_STEP_PROMPT.format(
@@ -127,8 +143,26 @@ class ExecutorAgent(BaseAgent):
             edit_file_context=edit_file_context,
         )
 
-        data = self._llm_query_json(self._sys_prompt, prompt)
+        try:
+            data = self._llm_query_json(self._sys_prompt, prompt)
+        except (RuntimeError, ValueError) as e:
+            import sys
+            print(f"  [Executor] Step LLM call failed: {e}", file=sys.stderr)
+            return TaskOutcome(
+                step_id=step.get("id", ""),
+                success=False,
+                output=f"LLM failed to return valid JSON: {e}",
+                error=f"LLM failed to return valid JSON: {e}",
+            )
         return self._apply_action(data, project_dir, step.get("id", ""))
+
+    @staticmethod
+    def _is_validation_error(output: str) -> bool:
+        """Check if a failure output is from content validation (not a runtime error)."""
+        markers = ("appears to be a natural-language description",
+                   "Python syntax error in",
+                   "Import validation failed in")
+        return any(m in output for m in markers)
 
     def _apply_action(self, data: dict, project_dir: str, step_id: str = "") -> TaskOutcome:
         """Apply a single action dict (from LLM response) to the filesystem."""
@@ -136,6 +170,14 @@ class ExecutorAgent(BaseAgent):
         file_path = data.get("file_path", "")
         content = data.get("content", "")
         affected_file = ""
+
+        # Handle auto-skip (LLM indicated work was already done)
+        if action_type == "skip" or data.get("_auto_skip"):
+            return TaskOutcome(
+                step_id=data.get("step_id", step_id),
+                success=True,
+                output=content or "(skipped — already complete)",
+            )
 
         if action_type == "write_file" and file_path:
             success, output = write_file_safe(file_path, content, project_dir)
@@ -150,10 +192,33 @@ class ExecutorAgent(BaseAgent):
                 file_path + "/.gitkeep", "", project_dir
             )
         elif action_type in ("run_command", "test") and content:
-            success, output = run_sandboxed(
-                content, cwd=project_dir,
-                timeout=self.stop_condition.timeout_seconds,
-            )
+            # Strip leading/trailing whitespace and remove any markdown fencing
+            content = content.strip()
+            if content.startswith("```"):
+                lines = content.split("\n")
+                content = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:]).strip()
+            # Guard against descriptions sneaking in as run_command content
+            # but allow actual shell commands through
+            if not _looks_like_shell_command(content) and _looks_like_description(content):
+                # Check if this is an "already done" response masquerading as run_command
+                _lower_content = content[:200].lower()
+                _done_markers = ("all", "already", "complete", "pass", "tests pass",
+                                 "no changes", "nothing to", "verified")
+                if any(_lower_content.startswith(m) or m in _lower_content for m in _done_markers):
+                    # Treat as successful skip — the LLM is reporting results, not a command
+                    success = True
+                    output = f"(auto-skip: LLM reported results instead of command) {content[:200]}"
+                else:
+                    success = False
+                    output = (
+                        f"Content for run_command appears to be a natural-language "
+                        f"description, not a shell command: {content[:100]!r}"
+                    )
+            else:
+                success, output = run_sandboxed(
+                    content, cwd=project_dir,
+                    timeout=self.stop_condition.timeout_seconds,
+                )
         else:
             success = True
             output = content or "(no output)"
@@ -165,6 +230,36 @@ class ExecutorAgent(BaseAgent):
             error="" if success else output[:500],
             affected_file=affected_file,
         )
+
+    def _retry_step_validation(
+        self,
+        step: dict,
+        action_data: dict,
+        validation_error: str,
+        project_dir: str,
+    ) -> TaskOutcome:
+        """Re-query the LLM for a single step that failed content validation."""
+        prompt = RETRY_VALIDATION_PROMPT.format(
+            validation_error=validation_error,
+            step_json=json.dumps(step, indent=2),
+            project_dir=project_dir,
+            step_id=step.get("id", ""),
+            action_type=action_data.get("action_type", "write_file"),
+            file_path=action_data.get("file_path", ""),
+        )
+        try:
+            data = self._llm_query_json(self._sys_prompt, prompt)
+        except RuntimeError:
+            return TaskOutcome(
+                step_id=step.get("id", ""),
+                success=False,
+                output="Retry LLM query failed",
+                error="Retry LLM query failed",
+            )
+        # Handle case where LLM returns a list instead of a dict
+        if isinstance(data, list):
+            data = data[0] if data else {}
+        return self._apply_action(data, project_dir, step.get("id", ""))
 
     def _build_edit_file_context(self, steps: list[dict], project_dir: str) -> str:
         """Build edit_file context for all edit_file steps in a batch."""
@@ -183,7 +278,7 @@ class ExecutorAgent(BaseAgent):
                 if content is not None:
                     parts.append(
                         f"Current content of {target_path}:\n"
-                        f"---\n{content[:6000]}\n---"
+                        f"---\n{content[:4000]}\n---"
                     )
         return "\n\n".join(parts)
 
@@ -201,6 +296,57 @@ class ExecutorAgent(BaseAgent):
             batches.append(current)
         return batches
 
+    def _build_changed_files_context(
+        self,
+        steps: list[dict],
+        project_dir: str,
+        session: _ExecutionSession,
+    ) -> str:
+        """Build context only for files that changed or are edit targets.
+
+        In continuation batches, instead of re-sending all edit_file contexts,
+        only include:
+        1. Files modified in previous batches that this batch's steps reference
+        2. New edit targets not yet seen
+        This dramatically reduces token usage in multi-batch tasks.
+        """
+        parts = []
+        seen_paths: set[str] = set()
+
+        for step in steps:
+            target_path = step.get("file_path", "")
+            if not target_path and step.get("tool") == "edit_file":
+                for word in step.get("description", "").split():
+                    if "/" in word or word.endswith((".py", ".js", ".ts", ".json", ".html", ".css")):
+                        target_path = word.strip("'\"`,;:")
+                        break
+
+            if not target_path or target_path in seen_paths:
+                continue
+            seen_paths.add(target_path)
+
+            # Only include if: it's an edit target, OR it was modified earlier
+            is_edit = step.get("tool") == "edit_file"
+            was_modified = target_path in session.modified_files
+            if not is_edit and not was_modified:
+                continue
+
+            content = read_file_safe(target_path, project_dir)
+            if content is not None:
+                parts.append(
+                    f"Current content of {target_path}:\n"
+                    f"---\n{content[:4000]}\n---"
+                )
+
+        # Also include a brief summary of other modified files not in this batch
+        other_modified = session.modified_files - seen_paths
+        if other_modified:
+            parts.append(
+                f"Other files modified in earlier steps: {', '.join(sorted(other_modified))}"
+            )
+
+        return "\n\n".join(parts)
+
     def _execute_batch(
         self,
         steps: list[dict],
@@ -210,9 +356,8 @@ class ExecutorAgent(BaseAgent):
         user_guidance: str = "",
     ) -> list[TaskOutcome]:
         """Execute a batch of steps with one LLM call."""
-        edit_ctx = self._build_edit_file_context(steps, project_dir)
-
         if session.is_empty:
+            edit_ctx = self._build_edit_file_context(steps, project_dir)
             prompt = EXECUTE_BATCH_PROMPT.format(
                 steps_json=json.dumps(steps, indent=2),
                 project_dir=project_dir,
@@ -220,6 +365,8 @@ class ExecutorAgent(BaseAgent):
                 edit_file_context=edit_ctx,
             )
         else:
+            # Context diff mode: only send changed/relevant file contents
+            edit_ctx = self._build_changed_files_context(steps, project_dir, session)
             prompt = EXECUTE_CONTINUATION_PROMPT.format(
                 transcript=session.get_transcript(),
                 steps_json=json.dumps(steps, indent=2),
@@ -234,7 +381,23 @@ class ExecutorAgent(BaseAgent):
                 "Incorporate this guidance into your implementation."
             )
 
-        actions = self._llm_query_json_list(self._sys_prompt, prompt)
+        try:
+            actions = self._llm_query_json_list(self._sys_prompt, prompt)
+        except (RuntimeError, ValueError) as e:
+            # LLM failed to return valid JSON after retries — return failed
+            # outcomes for all steps so reflection can handle this gracefully
+            # instead of crashing the entire task.
+            import sys
+            print(f"  [Executor] Batch LLM call failed: {e}", file=sys.stderr)
+            return [
+                TaskOutcome(
+                    step_id=s.get("id", ""),
+                    success=False,
+                    output=f"LLM failed to return valid JSON: {e}",
+                    error=f"LLM failed to return valid JSON: {e}",
+                )
+                for s in steps
+            ]
 
         outcomes: list[TaskOutcome] = []
         for i, step in enumerate(steps):
@@ -247,7 +410,20 @@ class ExecutorAgent(BaseAgent):
                     "content": "(no action returned by LLM)",
                 }
             outcome = self._apply_action(action_data, project_dir, step.get("id", ""))
+
+            # Step-level retry: if validation rejected the content, re-query
+            # the LLM once with the error feedback
+            if not outcome.success and self._is_validation_error(outcome.output):
+                retry_outcome = self._retry_step_validation(
+                    step, action_data, outcome.output, project_dir,
+                )
+                if retry_outcome.success:
+                    outcome = retry_outcome
+
             outcomes.append(outcome)
+            # Track modified files for context diff mode
+            if outcome.affected_file:
+                session.record_modified_file(outcome.affected_file)
             session.add_outcome(
                 step.get("id", ""),
                 action_data.get("action_type", ""),

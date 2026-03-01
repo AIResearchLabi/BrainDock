@@ -24,12 +24,14 @@ class BaseAgent:
         """Query the LLM and parse JSON response, with retry on failure.
 
         Retries on JSON parse errors and transient LLM/subprocess failures
-        (RuntimeError, TimeoutExpired, OSError).
+        (RuntimeError, TimeoutExpired, OSError). On JSON parse failure,
+        appends a stronger JSON enforcement reminder to the prompt.
         """
         last_error: Exception | None = None
+        current_prompt = user_prompt
         for attempt in range(MAX_LLM_RETRIES):
             try:
-                response = self.llm.query(system_prompt, user_prompt)
+                response = self.llm.query(system_prompt, current_prompt)
             except (RuntimeError, subprocess.TimeoutExpired, OSError) as e:
                 last_error = e
                 print(
@@ -47,6 +49,15 @@ class BaseAgent:
                     f"LLM response was not valid JSON, retrying...",
                     file=sys.stderr,
                 )
+                # Strengthen JSON enforcement on retry
+                current_prompt = (
+                    user_prompt
+                    + "\n\nCRITICAL REMINDER: Your previous response was NOT valid JSON. "
+                    "You MUST respond with ONLY a valid JSON object. "
+                    "No prose, no markdown, no explanations — ONLY the JSON object. "
+                    "If the work is already done, still respond with the JSON format "
+                    "using action_type 'skip'."
+                )
         raise RuntimeError(
             f"LLM failed after {MAX_LLM_RETRIES} attempts: {last_error}"
         )
@@ -58,9 +69,10 @@ class BaseAgent:
         a single dict, it is wrapped in a list for convenience.
         """
         last_error: Exception | None = None
+        current_prompt = user_prompt
         for attempt in range(MAX_LLM_RETRIES):
             try:
-                response = self.llm.query(system_prompt, user_prompt)
+                response = self.llm.query(system_prompt, current_prompt)
             except (RuntimeError, subprocess.TimeoutExpired, OSError) as e:
                 last_error = e
                 print(
@@ -80,6 +92,16 @@ class BaseAgent:
                     f"  [Retry {attempt + 1}/{MAX_LLM_RETRIES}] "
                     f"LLM response was not valid JSON, retrying...",
                     file=sys.stderr,
+                )
+                # Strengthen JSON enforcement on retry
+                current_prompt = (
+                    user_prompt
+                    + "\n\nCRITICAL REMINDER: Your previous response was NOT valid JSON. "
+                    "You MUST respond with ONLY a valid JSON array. "
+                    "No prose, no markdown, no explanations — ONLY the JSON array. "
+                    "If the work is already done, respond with: "
+                    '[{"action_type": "skip", "step_id": "", "content": "already done", '
+                    '"file_path": "", "verification": "work already complete"}]'
                 )
         raise RuntimeError(
             f"LLM failed after {MAX_LLM_RETRIES} attempts: {last_error}"

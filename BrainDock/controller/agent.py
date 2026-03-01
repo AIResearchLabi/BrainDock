@@ -26,6 +26,10 @@ class ControllerAgent:
         self.thresholds = thresholds or GateThresholds()
         self.state = state or ControllerState()
 
+    def reset_for_task(self) -> None:
+        """Reset per-task counters so failures don't cascade across tasks."""
+        self.state.reset_for_task()
+
     def check_plan_gate(self, plan: dict) -> GateResult:
         """Check if a plan passes the quality gate.
 

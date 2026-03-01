@@ -432,6 +432,8 @@
   .result-card.open .result-card-body { display: block; }
   .result-card-body pre { background: var(--bg); padding: 8px 10px; border-radius: 4px; overflow-x: auto; font-family: 'SF Mono', 'Cascadia Code', monospace; font-size: 11px; white-space: pre-wrap; word-break: break-word; margin-top: 6px; max-height: 200px; overflow-y: auto; }
 
+  .result-card-summary { font-size: 12px; color: var(--text-dim); margin-left: 10px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 500px; display: inline-block; vertical-align: middle; }
+
   .tag { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; text-transform: uppercase; }
   .tag-green { background: rgba(52,211,153,0.15); color: var(--green); }
   .tag-red { background: rgba(248,113,113,0.15); color: var(--red); }
@@ -882,6 +884,78 @@
     outline: none;
     border-color: var(--accent);
   }
+
+  /* ─── Tab 5: Skills ─── */
+  #tab-skills { padding: 0; }
+  #tab-skills .activity-feed { padding: 16px 24px; display: flex; flex-direction: column; gap: 12px; }
+
+  .skill-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+  }
+
+  .skill-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+
+  .skill-card-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--cyan);
+  }
+
+  .skill-card-usage {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-family: monospace;
+  }
+
+  .skill-card-desc {
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+    line-height: 1.5;
+  }
+
+  .skill-card-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 8px;
+  }
+
+  .skill-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 600;
+    background: rgba(34,211,238,0.12);
+    color: var(--cyan);
+  }
+
+  .skill-card-source {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+  }
+
+  .skill-card-pattern {
+    background: var(--bg);
+    padding: 8px 10px;
+    border-radius: 4px;
+    font-family: 'SF Mono', 'Cascadia Code', monospace;
+    font-size: 11px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text-dim);
+    line-height: 1.5;
+  }
 </style>
 </head>
 <body>
@@ -909,6 +983,9 @@
   <button class="tab-btn" onclick="switchTab('logs')" id="tabBtnLogs">
     Logs
     <span class="tab-badge" id="logsBadge"></span>
+  </button>
+  <button class="tab-btn" onclick="switchTab('skills')" id="tabBtnSkills">
+    Skills
   </button>
 </div>
 
@@ -1088,6 +1165,13 @@
   </div>
 </div>
 
+<!-- Tab 5: Skills -->
+<div class="tab-content" id="tab-skills">
+  <div class="activity-feed" id="skillsFeed">
+    <div class="empty-state" id="skillsEmpty">No skills learned yet. Skills appear here as the pipeline learns reusable patterns.</div>
+  </div>
+</div>
+
 <script>
 const MODES = [
   { key: 'specification', label: 'Spec', num: 1 },
@@ -1123,6 +1207,7 @@ let logsCursor = 0;
 let lastState = null;
 let runsLoaded = false;
 let logsTotals = { calls: 0, input: 0, output: 0, time: 0 };
+let activeRunTitle = null;
 
 // ─── Tab Switching ───
 function switchTab(tab) {
@@ -1139,6 +1224,8 @@ function switchTab(tab) {
   if (tab === 'agents') scrollActivity();
   if (tab === 'chat') scrollChat();
   if (tab === 'logs') scrollLogs();
+  // Lazy-load skills
+  if (tab === 'skills') loadSkills();
 }
 
 // ─── Helpers ───
@@ -1188,6 +1275,7 @@ async function startPipeline() {
     }
     const data = await r.json();
     if (data.error) { alert(data.error); btn.disabled = false; btn.textContent = 'Start Pipeline'; return; }
+    activeRunTitle = data.title || title || problem.substring(0, 60);
   } catch (e) { alert('Failed: ' + e.message); }
   btn.disabled = false;
   btn.textContent = 'Start Pipeline';
@@ -1209,6 +1297,7 @@ async function resumeRun(title) {
     if (data.error) {
       alert(data.error);
     } else {
+      activeRunTitle = title;
       // Reset cursors so full restored history is fetched
       activityCursor = 0;
       chatCursor = 0;
@@ -1238,6 +1327,23 @@ async function loadRun(title) {
       logsCursor = 0;
       logsTotals = { calls: 0, input: 0, output: 0, time: 0 };
     }
+  } catch (e) { alert('Failed: ' + e.message); }
+}
+
+// ─── Pause Run ───
+async function pauseRun() {
+  try {
+    const r = await fetch(apiUrl('api/pause'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    const ct = r.headers.get('content-type') || '';
+    if (!ct.includes('application/json')) {
+      throw new Error('Server returned non-JSON response.');
+    }
+    const data = await r.json();
+    if (data.error) alert(data.error);
   } catch (e) { alert('Failed: ' + e.message); }
 }
 
@@ -1295,6 +1401,10 @@ async function loadRuns() {
       count.textContent = runs.length;
       list.innerHTML = runs.map(r => {
         const safeTitle = esc(r.title).replace(/'/g, "\\'");
+        const isActive = lastState && lastState._running && activeRunTitle === r.title;
+        const actionBtn = isActive
+          ? `<button class="btn" style="background:var(--yellow);color:#000" onclick="pauseRun()">Pause</button>`
+          : `<button class="btn" onclick="resumeRun('${safeTitle}')">Resume</button>`;
         return `
         <div class="run-item">
           <div class="run-item-info">
@@ -1304,7 +1414,7 @@ async function loadRuns() {
           </div>
           <div class="run-item-actions">
             <button class="btn btn-secondary" onclick="loadRun('${safeTitle}')">Load</button>
-            <button class="btn" onclick="resumeRun('${safeTitle}')">Resume</button>
+            ${actionBtn}
           </div>
         </div>`;
       }).join('');
@@ -1564,37 +1674,55 @@ function renderResults(state) {
   const body = document.getElementById('resultsBody');
   const cards = [];
   if (state.spec && Object.keys(state.spec).length) {
-    cards.push(makeCard('Specification: ' + esc(state.spec.title||'Untitled'), 'tag-blue', '<pre>' + esc(JSON.stringify(state.spec,null,2)) + '</pre>'));
+    const specSum = esc(state.spec.summary || state.spec.goals?.join(', ') || '');
+    cards.push(makeCard('Specification: ' + esc(state.spec.title||'Untitled'), 'tag-blue', '<pre>' + esc(JSON.stringify(state.spec,null,2)) + '</pre>', specSum));
   }
   (state.plans || []).forEach((p, i) => {
     const title = p.task_title || p.task_description || 'Plan '+(i+1);
     const steps = (p.steps||[]).map(s => '\u2022 ' + (s.description||s.action||JSON.stringify(s))).join('\n');
-    cards.push(makeCard('Plan: '+esc(title), 'tag-blue', '<div>Confidence: '+(p.confidence??'\u2014')+' | Entropy: '+(p.entropy??'\u2014')+'</div>'+(steps?'<pre>'+esc(steps)+'</pre>':'')));
+    const nSteps = (p.steps||[]).length;
+    const conf = p.metrics?.confidence ?? p.confidence;
+    const planSum = esc(nSteps + ' step' + (nSteps !== 1 ? 's' : '') + (conf != null ? ' \u00b7 confidence ' + Number(conf).toFixed(2) : ''));
+    cards.push(makeCard('Plan: '+esc(title), 'tag-blue', '<div>Confidence: '+(conf??'\u2014')+' | Entropy: '+(p.metrics?.entropy??p.entropy??'\u2014')+'</div>'+(steps?'<pre>'+esc(steps)+'</pre>':''), planSum));
   });
   (state.execution_results || []).forEach((r, i) => {
-    cards.push(makeCard('Execution '+(i+1)+': '+(r.success?'Success':'Failed'), r.success?'tag-green':'tag-red', '<pre>'+esc(JSON.stringify(r,null,2))+'</pre>'));
+    const files = (r.generated_files||[]);
+    const execSum = esc(r.steps_completed + '/' + r.steps_total + ' steps' + (files.length ? ' \u00b7 ' + files.length + ' file' + (files.length !== 1 ? 's' : '') : '') + (r.stop_reason ? ' \u00b7 ' + r.stop_reason.substring(0, 60) : ''));
+    cards.push(makeCard('Execution '+(i+1)+': '+(r.success?'Success':'Failed'), r.success?'tag-green':'tag-red', '<pre>'+esc(JSON.stringify(r,null,2))+'</pre>', execSum));
   });
-  (state.reflections || []).forEach((r, i) => { cards.push(makeCard('Reflection '+(i+1), 'tag-yellow', '<pre>'+esc(JSON.stringify(r,null,2))+'</pre>')); });
-  (state.debates || []).forEach((d, i) => { cards.push(makeCard('Debate '+(i+1), 'tag-purple', '<pre>'+esc(JSON.stringify(d,null,2))+'</pre>')); });
+  (state.reflections || []).forEach((r, i) => {
+    const refSum = esc((r.should_retry ? 'Retry' : 'No retry') + (r.analysis ? ' \u00b7 ' + r.analysis.substring(0, 80) : ''));
+    cards.push(makeCard('Reflection '+(i+1), 'tag-yellow', '<pre>'+esc(JSON.stringify(r,null,2))+'</pre>', refSum));
+  });
+  (state.debates || []).forEach((d, i) => {
+    const debSum = esc((d.rounds || d.perspectives?.length || 0) + ' round' + ((d.rounds||d.perspectives?.length||0) !== 1 ? 's' : '') + (d.outcome ? ' \u00b7 ' + d.outcome.substring(0, 80) : ''));
+    cards.push(makeCard('Debate '+(i+1), 'tag-purple', '<pre>'+esc(JSON.stringify(d,null,2))+'</pre>', debSum));
+  });
   (state.market_studies || []).forEach((m, i) => {
     const title = 'Market Study: ' + esc(m.task_id || 'Study '+(i+1));
+    const nComp = (m.competitors||[]).length;
+    const msSum = esc((nComp ? nComp + ' competitor' + (nComp !== 1 ? 's' : '') : '') + (m.target_audience ? ' \u00b7 ' + m.target_audience.substring(0, 60) : ''));
     let mbody = '';
     if (m.target_audience) mbody += '<div><strong>Audience:</strong> '+esc(m.target_audience)+'</div>';
     if (m.positioning) mbody += '<div><strong>Positioning:</strong> '+esc(m.positioning)+'</div>';
     if (m.competitors && m.competitors.length) mbody += '<div><strong>Competitors:</strong> '+m.competitors.map(c=>esc(c)).join(', ')+'</div>';
     if (m.recommendations && m.recommendations.length) mbody += '<div><strong>Recommendations:</strong><ul>'+m.recommendations.map(r=>'<li>'+esc(r)+'</li>').join('')+'</ul></div>';
     if (m.risks && m.risks.length) mbody += '<div><strong>Risks:</strong><ul>'+m.risks.map(r=>'<li>'+esc(r)+'</li>').join('')+'</ul></div>';
-    cards.push(makeCard(title, 'tag-yellow', mbody || '<pre>'+esc(JSON.stringify(m,null,2))+'</pre>'));
+    cards.push(makeCard(title, 'tag-yellow', mbody || '<pre>'+esc(JSON.stringify(m,null,2))+'</pre>', msSum));
   });
   (state.escalations || []).forEach((e, i) => {
     const title = 'Escalation: ' + esc(e.task_id || 'Escalation '+(i+1));
+    const escSum = esc((e.action || '') + ' \u00b7 ' + (e.reason || '').substring(0, 80));
     let ebody = '<div><strong>Trigger:</strong> ' + esc(e.trigger || '') + '</div>';
     ebody += '<div><strong>Reason:</strong> ' + esc(e.reason || '') + '</div>';
     ebody += '<div><strong>Action:</strong> ' + esc(e.action || '') + '</div>';
     if (e.hint) ebody += '<div><strong>Hint:</strong> ' + esc(e.hint) + '</div>';
-    cards.push(makeCard(title, 'tag-yellow', ebody));
+    cards.push(makeCard(title, 'tag-yellow', ebody, escSum));
   });
-  (state.learned_skills || []).forEach((s, i) => { cards.push(makeCard('Skill: '+esc(s.name||'Skill '+(i+1)), 'tag-green', '<div>'+esc(s.description||'')+'</div>'+(s.pattern?'<pre>'+esc(s.pattern)+'</pre>':''))); });
+  (state.learned_skills || []).forEach((s, i) => {
+    const skillSum = esc(s.description || '');
+    cards.push(makeCard('Skill: '+esc(s.name||'Skill '+(i+1)), 'tag-green', '<div>'+esc(s.description||'')+'</div>'+(s.pattern?'<pre>'+esc(s.pattern)+'</pre>':''), skillSum));
+  });
 
   // Only re-render if content changed — preserves open/closed card state
   const newHtml = cards.length ? cards.join('') : '<div class="empty-state">Results will appear as the pipeline runs</div>';
@@ -1617,8 +1745,9 @@ function renderResults(state) {
   }
 }
 
-function makeCard(title, tagClass, content) {
-  return '<div class="result-card" onclick="this.classList.toggle(\'open\')"><div class="result-card-header"><span><span class="tag '+tagClass+'">'+title+'</span></span><span class="result-card-chevron">&#9654;</span></div><div class="result-card-body">'+content+'</div></div>';
+function makeCard(title, tagClass, content, summary) {
+  const sumHtml = summary ? '<span class="result-card-summary">'+summary+'</span>' : '';
+  return '<div class="result-card" onclick="this.classList.toggle(\'open\')"><div class="result-card-header"><span><span class="tag '+tagClass+'">'+title+'</span>'+sumHtml+'</span><span class="result-card-chevron">&#9654;</span></div><div class="result-card-body">'+content+'</div></div>';
 }
 
 let _renderedQuestionIds = null;
@@ -1928,6 +2057,33 @@ function updateStatus(state) {
   }
 }
 
+// ─── Skills Tab ───
+async function loadSkills() {
+  try {
+    const data = await fetchJson(apiUrl('api/skills'));
+    const skills = data.skills || [];
+    const feed = document.getElementById('skillsFeed');
+    const empty = document.getElementById('skillsEmpty');
+    if (!skills.length) {
+      feed.innerHTML = '<div class="empty-state">No skills learned yet. Skills appear here as the pipeline learns reusable patterns.</div>';
+      return;
+    }
+    if (empty) empty.remove();
+    feed.innerHTML = skills.map(s => {
+      const tags = (s.tags || []).map(t => '<span class="skill-tag">' + esc(t) + '</span>').join('');
+      const source = s.source_task ? '<div class="skill-card-source">Source: ' + esc(s.source_task) + '</div>' : '';
+      const pattern = s.pattern ? '<div class="skill-card-pattern">' + esc(s.pattern) + '</div>' : '';
+      const usage = s.usage_count ? 'Used ' + s.usage_count + 'x' : '';
+      return '<div class="skill-card">' +
+        '<div class="skill-card-header"><span class="skill-card-name">' + esc(s.name) + '</span><span class="skill-card-usage">' + esc(usage) + '</span></div>' +
+        '<div class="skill-card-desc">' + esc(s.description) + '</div>' +
+        (tags ? '<div class="skill-card-tags">' + tags + '</div>' : '') +
+        source + pattern +
+        '</div>';
+    }).join('');
+  } catch (e) { /* ignore */ }
+}
+
 // ─── Polling Loop ───
 async function poll() {
   try {
@@ -1938,6 +2094,10 @@ async function poll() {
       fetchJson(apiUrl('api/logs?since=' + logsCursor)),
     ]);
 
+    // Clear activeRunTitle when pipeline stops running
+    if (lastState && lastState._running && !state._running) {
+      activeRunTitle = null;
+    }
     lastState = state;
     updateStatus(state);
 
@@ -1952,8 +2112,8 @@ async function poll() {
     renderChatMessages(chat.entries || []);
     renderLogs(logs.entries || []);
 
-    // Load runs list once
-    if (!runsLoaded) loadRuns();
+    // Re-render runs list on every poll so button state stays current
+    loadRuns();
   } catch (e) {
     const dot = document.getElementById('statusDot');
     const label = document.getElementById('statusLabel');

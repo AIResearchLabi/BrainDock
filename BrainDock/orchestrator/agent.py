@@ -22,7 +22,7 @@ from BrainDock.controller.agent import ControllerAgent
 from BrainDock.controller.models import GateThresholds
 from BrainDock.executor.agent import ExecutorAgent
 from BrainDock.executor.models import StopCondition, VerifyResult
-from BrainDock.executor.sandbox import verify_project
+from BrainDock.executor.sandbox import verify_project, scan_for_corrupted_files
 from BrainDock.skill_bank.agent import SkillLearningAgent
 from BrainDock.skill_bank.storage import load_skill_bank, save_skill_bank
 from BrainDock.reflection.agent import ReflectionAgent
@@ -67,11 +67,43 @@ def _adaptive_profile(base_profile: str, budget_pct: float) -> str:
     return levels[idx]
 
 
+def _extract_relevant_paths(task_dict: dict) -> list[str] | None:
+    """Extract likely relevant file path substrings from a task dict.
+
+    Scans the task title, description, and tags for module/directory names
+    to prioritize in project context scanning.
+    """
+    text = " ".join([
+        task_dict.get("title", ""),
+        task_dict.get("description", ""),
+        " ".join(task_dict.get("tags", [])),
+    ]).lower()
+
+    paths = []
+    # Look for module-like path segments
+    for word in text.split():
+        word = word.strip("(),.:;'\"")
+        if "/" in word and not word.startswith("http"):
+            paths.append(word)
+        elif word.endswith(".py") or word.endswith(".js") or word.endswith(".ts"):
+            paths.append(word)
+
+    # Extract module names (e.g., "outreach" from "outreach module")
+    import re
+    module_patterns = re.findall(r'\b([a-z_]+)(?:\s+module|\s+agent|\s+scanner)\b', text)
+    for mod in module_patterns:
+        if mod not in ("the", "new", "existing", "this"):
+            paths.append(f"{mod}/")
+
+    return paths if paths else None
+
+
 def _build_project_context(
     spec: dict,
     project_dir: str,
     completed_tasks: list[str] | None = None,
     profile: str = ContextProfile.FULL,
+    relevant_paths: list[str] | None = None,
 ) -> str:
     """Build enriched project context including file snapshot.
 
@@ -80,6 +112,7 @@ def _build_project_context(
         project_dir: Path to the project output directory.
         completed_tasks: List of completed task IDs.
         profile: Context size profile — "full", "medium", "light", or "minimal".
+        relevant_paths: Optional path substrings to prioritize in scanning.
 
     Returns:
         Context string for LLM prompts.
@@ -87,7 +120,7 @@ def _build_project_context(
     base = f"Project: {spec.get('title', '')}\nSummary: {spec.get('summary', '')}\n"
     if completed_tasks:
         base += f"Completed tasks: {', '.join(completed_tasks)}\n"
-    snapshot = scan_project(project_dir, profile=profile)
+    snapshot = scan_project(project_dir, profile=profile, relevant_paths=relevant_paths)
     base += "\n" + snapshot.to_context_string()
     return base
 
@@ -286,6 +319,7 @@ class OrchestratorAgent:
         on_state: Callable | None = None,
         on_llm_log: Callable | None = None,
         check_guidance: Callable[[], list[str]] | None = None,
+        check_stop: Callable[[], bool] | None = None,
     ) -> PipelineState:
         """Run the full pipeline from problem statement to execution.
 
@@ -426,6 +460,38 @@ class OrchestratorAgent:
         project_dir = os.path.join(output_dir, "project")
         Path(project_dir).mkdir(parents=True, exist_ok=True)
 
+        # ── On resume: scan for corrupted files and clean them ────
+        if resumed_state:
+            corrupted = scan_for_corrupted_files(project_dir)
+            if corrupted:
+                for cf in corrupted:
+                    _emit(on_activity, "orchestrator", "corruption_detected",
+                          f"Removing corrupted file: {cf['path']} — {cf['reason'][:100]}", "warning")
+                    try:
+                        os.remove(cf["absolute_path"])
+                    except OSError:
+                        pass
+
+                # Re-check which tasks produced corrupted files and mark
+                # them for retry by moving them from completed to failed
+                corrupted_paths = {cf["path"] for cf in corrupted}
+                tasks_to_retry = []
+                for exec_res in state.execution_results:
+                    gen_files = set(exec_res.get("generated_files", []))
+                    if gen_files & corrupted_paths:
+                        tid = exec_res.get("task_id", "")
+                        if tid and tid in state.completed_tasks:
+                            tasks_to_retry.append(tid)
+
+                for tid in tasks_to_retry:
+                    state.completed_tasks.remove(tid)
+                    if tid not in state.failed_tasks:
+                        state.failed_tasks.append(tid)
+                    _emit(on_activity, "orchestrator", "task_retry",
+                          f"Task {tid} marked for retry due to corrupted output files", "warning")
+
+                _save_with_budget(state, output_dir)
+
         # ── Process tasks by wave ──────────────────────────────────
         thresholds = GateThresholds(
             min_confidence=self.config.min_confidence,
@@ -458,6 +524,12 @@ class OrchestratorAgent:
 
         for group in groups:
             for task_node in group:
+                # Check if user requested a pause
+                if check_stop and check_stop():
+                    _emit(on_activity, "orchestrator", "paused", "Pipeline paused by user")
+                    _save_with_budget(state, output_dir)
+                    return state
+
                 # Skip tasks already completed or permanently failed in a previous run
                 if task_node.id in completed_ids:
                     print(f"  Skipping task '{task_node.id}' — already completed")
@@ -468,6 +540,7 @@ class OrchestratorAgent:
                     failed_ids.discard(task_node.id)
 
                 task_dict = task_node.to_dict()
+                controller.reset_for_task()
                 budget_tracker.start_task(task_node.id)
                 state.token_usage = budget_tracker.get_snapshot()
                 _emit(on_activity, "orchestrator", "task_start", f"Task: {task_node.id} — {task_node.title}")
@@ -476,10 +549,12 @@ class OrchestratorAgent:
                     # ── Refresh project context (full for planner) ────
                     _budget_pct = budget_tracker.get_snapshot()["global_pct"] if self.config.context_optimization else 0
                     _ctx_profile = _adaptive_profile(ContextProfile.FULL, _budget_pct) if self.config.context_optimization else ContextProfile.FULL
+                    _relevant = _extract_relevant_paths(task_dict)
                     project_context = _build_project_context(
                         state.spec, project_dir,
                         completed_tasks=state.completed_tasks,
                         profile=_ctx_profile,
+                        relevant_paths=_relevant,
                     )
 
                     # ── Budget check before planning ──────────────────
@@ -878,6 +953,12 @@ class OrchestratorAgent:
                             )
                             skill_bank.add(skill)
                             state.learned_skills.append(skill.to_dict())
+                            # Immediately persist to global bank so skills survive interruption
+                            per_run_path = os.path.join(output_dir, "skill_bank", "skills.json")
+                            save_skill_bank(skill_bank, per_run_path)
+                            global_bank = load_skill_bank(global_skill_bank_path)
+                            global_bank.merge(skill_bank)
+                            save_skill_bank(global_bank, global_skill_bank_path)
                             _emit(on_activity, "skill_learning", "completed", f"Learned: {skill.name}", "success")
                             _emit(on_activity, "skill_learning", "output",
                                   f"Skill: {skill.name}\nDescription: {skill.description}\nPattern: {skill.pattern}", "info")
@@ -904,17 +985,6 @@ class OrchestratorAgent:
 
                 # Reset reflection for next task
                 reflection_agent.reset()
-
-        # Save skill bank
-        if state.learned_skills:
-            # Per-run copy for traceability
-            per_run_path = os.path.join(output_dir, "skill_bank", "skills.json")
-            save_skill_bank(skill_bank, per_run_path)
-
-            # Merge into global bank (re-load to pick up concurrent additions)
-            global_bank = load_skill_bank(global_skill_bank_path)
-            global_bank.merge(skill_bank)
-            save_skill_bank(global_bank, global_skill_bank_path)
 
         # Update final task graph state
         state.task_graph = task_graph.to_dict()

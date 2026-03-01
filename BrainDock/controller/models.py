@@ -82,6 +82,16 @@ class ControllerState:
         """Record that a debate round occurred."""
         self.debate_count += 1
 
+    def reset_for_task(self) -> None:
+        """Reset per-task counters. Called at the start of each new task.
+
+        Preserves gate_history for debugging, but resets failure/reflection/
+        debate counts so one task's failures don't cascade into another.
+        """
+        self.failure_count = 0
+        self.reflection_count = 0
+        self.debate_count = 0
+
     def to_dict(self) -> dict:
         return asdict(self)
 
