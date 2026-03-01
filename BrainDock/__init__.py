@@ -11,7 +11,6 @@ Modules:
     BrainDock.skill_bank    — Reusable skill/pattern library (Mode 6)
     BrainDock.reflection    — Failure root-cause analysis (Mode 7)
     BrainDock.debate        — Multi-perspective design reasoning (Mode 8)
-    BrainDock.outreach      — WhatsApp & LinkedIn market survey outreach
     BrainDock.orchestrator  — Pipeline orchestrator and CLI
 
 Shared infrastructure:
