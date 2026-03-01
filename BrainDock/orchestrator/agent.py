@@ -24,7 +24,8 @@ from BrainDock.executor.agent import ExecutorAgent
 from BrainDock.executor.models import StopCondition, VerifyResult
 from BrainDock.executor.sandbox import verify_project, scan_for_corrupted_files
 from BrainDock.skill_bank.agent import SkillLearningAgent
-from BrainDock.skill_bank.storage import load_skill_bank, save_skill_bank
+from BrainDock.skill_bank.models import SkillBank as SkillBankModel
+from BrainDock.skill_bank.storage import load_skill_bank, load_with_seeds, save_skill_bank
 from BrainDock.reflection.agent import ReflectionAgent
 from BrainDock.debate.agent import DebateAgent
 from BrainDock.market_study.agent import MarketStudyAgent
@@ -452,9 +453,13 @@ class OrchestratorAgent:
         if self.config.skip_execution:
             return state
 
-        # ── Load skill bank (global) ──────────────────────────────
+        # ── Load skill bank (global + optional seeds) ─────────────
         global_skill_bank_path = self.config.resolve_global_skill_bank_path()
-        skill_bank = load_skill_bank(global_skill_bank_path)
+        seed_path = self.config.seed_skill_bank_path
+        if seed_path:
+            skill_bank = load_with_seeds(global_skill_bank_path, seed_path)
+        else:
+            skill_bank = load_skill_bank(global_skill_bank_path)
 
         # ── Create project directory before task loop ──────────────
         project_dir = os.path.join(output_dir, "project")
@@ -540,6 +545,7 @@ class OrchestratorAgent:
                     failed_ids.discard(task_node.id)
 
                 task_dict = task_node.to_dict()
+                matched = []  # skill matches for this task (reset per iteration)
                 controller.reset_for_task()
                 budget_tracker.start_task(task_node.id)
                 state.token_usage = budget_tracker.get_snapshot()
@@ -582,10 +588,38 @@ class OrchestratorAgent:
                     self._save_state(state, output_dir, on_state)
                     _set_agent("planner")
                     _emit(on_activity, "planner", "mode_change", f"Planning task: {task_node.id}")
-                    available_skills = [
-                        {"id": s.id, "name": s.name, "description": s.description}
-                        for s in skill_bank.skills
-                    ]
+                    # Filter to reliable skills, then match relevant ones
+                    try:
+                        reliable_skills = skill_bank.get_reliable_skills(0.3)
+                        reliable_bank = SkillBankModel(skills=reliable_skills)
+                        matched = skill_agent.match_skills(
+                            task_dict.get("description", task_dict.get("title", "")),
+                            reliable_bank,
+                        )
+                        # Keep only high/medium relevance
+                        matched = [m for m in matched if m.get("relevance") in ("high", "medium")]
+                        if matched:
+                            available_skills = [
+                                {"id": m["skill_id"], "relevance": m.get("relevance", ""),
+                                 "application": m.get("application", ""),
+                                 "name": getattr(skill_bank.get(m["skill_id"]), "name", ""),
+                                 "description": getattr(skill_bank.get(m["skill_id"]), "description", "")}
+                                for m in matched if skill_bank.get(m["skill_id"])
+                            ]
+                        else:
+                            # Fallback: top 5 by reliability
+                            top = sorted(reliable_skills, key=lambda s: s.reliability_score, reverse=True)[:5]
+                            available_skills = [
+                                {"id": s.id, "name": s.name, "description": s.description}
+                                for s in top
+                            ]
+                    except Exception:
+                        # Graceful degradation: dump all skills
+                        available_skills = [
+                            {"id": s.id, "name": s.name, "description": s.description}
+                            for s in skill_bank.skills
+                        ]
+                        matched = []
                     plan = planner.plan_task(
                         task_dict,
                         context=project_context,
@@ -964,6 +998,16 @@ class OrchestratorAgent:
                                   f"Skill: {skill.name}\nDescription: {skill.description}\nPattern: {skill.pattern}", "info")
                         except Exception:
                             _emit(on_activity, "skill_learning", "failed", "Skill extraction failed (non-fatal)", "warning")
+
+                    # Record skill outcomes for matched skills
+                    if matched:
+                        matched_ids = [m["skill_id"] for m in matched if skill_bank.get(m["skill_id"])]
+                        if exec_result.success:
+                            for sid in matched_ids:
+                                skill_bank.record_success(sid)
+                        else:
+                            for sid in matched_ids:
+                                skill_bank.record_failure(sid)
 
                     # Track completion
                     if exec_result.success:

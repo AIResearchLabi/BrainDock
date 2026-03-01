@@ -27,6 +27,7 @@ from tests.e2e.mock_responses import (
     make_debate_responses,
     make_market_study,
     make_skill,
+    make_skill_match,
     make_sequenced_llm,
 )
 
@@ -368,8 +369,9 @@ class TestE2EMultipleTasks(unittest.TestCase):
                 "verification": "",
             }]),
             make_skill("skill_core"),                        # 6: skill t1
-            # Task t2
-            make_plan(task_id="t2", task_title="Create CLI wrapper"),  # 7: plan t2
+            # Task t2 (bank now has skill_core, so match_skills runs)
+            make_skill_match(),                               # 7: match_skills for t2
+            make_plan(task_id="t2", task_title="Create CLI wrapper"),  # 8: plan t2
             make_exec_batch([{                               # 8: execute t2
                 "step_id": "s1",
                 "action_type": "write_file",

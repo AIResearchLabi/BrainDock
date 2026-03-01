@@ -36,6 +36,7 @@ Respond in this exact JSON format:
   "name": "Human-readable skill name",
   "description": "What this skill does and when to use it (2-3 sentences)",
   "tags": ["tag1", "tag2", "tag3"],
+  "category": "domain/subdomain (e.g. code/scaffolding, web/scraping, data/parsing, integration/subprocess, workflow/retry, human/prompting)",
   "pattern": "The abstract pattern/algorithm (pseudo-code or description)",
   "example_code": "A minimal code example demonstrating the pattern"
 }}"""

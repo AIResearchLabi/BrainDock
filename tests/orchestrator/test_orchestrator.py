@@ -112,6 +112,11 @@ SKILL_EXTRACT = json.dumps({
     "example_code": "def calc(expr): return eval(expr)",
 })
 
+# Skill matching response (match_skills called before planning)
+SKILL_MATCH = json.dumps({
+    "matches": []
+})
+
 
 # ── Web App Skill Reuse Mocks ─────────────────────────────────────────
 
@@ -970,6 +975,20 @@ class TestGlobalSkillBankPath(unittest.TestCase):
             os.path.join("/tmp/out", "skill_bank", "skills.json"),
         )
 
+    def test_seed_skill_bank_path_default(self):
+        config = RunConfig()
+        self.assertEqual(config.seed_skill_bank_path, "")
+
+    def test_seed_skill_bank_path_roundtrip(self):
+        config = RunConfig(seed_skill_bank_path="/my/seeds.json")
+        d = config.to_dict()
+        restored = RunConfig.from_dict(d)
+        self.assertEqual(restored.seed_skill_bank_path, "/my/seeds.json")
+
+    def test_seed_skill_bank_path_from_dict_missing(self):
+        restored = RunConfig.from_dict({"output_dir": "/tmp/out"})
+        self.assertEqual(restored.seed_skill_bank_path, "")
+
 
 class TestOrchestratorGuidance(unittest.TestCase):
     """Test the _drain_guidance_text helper and check_guidance propagation."""
@@ -1050,23 +1069,26 @@ class TestGlobalSkillBankWebApp(unittest.TestCase):
 
         return CallableBackend(mock_fn)
 
-    def _webapp_llm(self, skill_resp=SKILL_JWT_AUTH, captured=None):
-        return self._make_llm([
-            WEBAPP_SPEC_ANALYZE, WEBAPP_SPEC_REFINE, WEBAPP_SPEC_GENERATE,
-            WEBAPP_TASK_GRAPH, WEBAPP_PLAN, WEBAPP_EXEC_WRITE, skill_resp,
-        ], captured)
+    def _webapp_llm(self, skill_resp=SKILL_JWT_AUTH, captured=None, has_prior_skills=False):
+        seq = [WEBAPP_SPEC_ANALYZE, WEBAPP_SPEC_REFINE, WEBAPP_SPEC_GENERATE, WEBAPP_TASK_GRAPH]
+        if has_prior_skills:
+            seq.append(SKILL_MATCH)
+        seq.extend([WEBAPP_PLAN, WEBAPP_EXEC_WRITE, skill_resp])
+        return self._make_llm(seq, captured)
 
-    def _shop_llm(self, captured=None):
-        return self._make_llm([
-            WEBAPP_SPEC_ANALYZE, WEBAPP_SPEC_REFINE, SHOP_SPEC_GENERATE,
-            SHOP_TASK_GRAPH, SHOP_PLAN, SHOP_EXEC_WRITE, SKILL_REST_CRUD,
-        ], captured)
+    def _shop_llm(self, captured=None, has_prior_skills=False):
+        seq = [WEBAPP_SPEC_ANALYZE, WEBAPP_SPEC_REFINE, SHOP_SPEC_GENERATE, SHOP_TASK_GRAPH]
+        if has_prior_skills:
+            seq.append(SKILL_MATCH)
+        seq.extend([SHOP_PLAN, SHOP_EXEC_WRITE, SKILL_REST_CRUD])
+        return self._make_llm(seq, captured)
 
-    def _form_llm(self, captured=None):
-        return self._make_llm([
-            WEBAPP_SPEC_ANALYZE, WEBAPP_SPEC_REFINE, FORM_SPEC_GENERATE,
-            FORM_TASK_GRAPH, FORM_PLAN, FORM_EXEC_WRITE, SKILL_FORM_VALIDATION,
-        ], captured)
+    def _form_llm(self, captured=None, has_prior_skills=False):
+        seq = [WEBAPP_SPEC_ANALYZE, WEBAPP_SPEC_REFINE, FORM_SPEC_GENERATE, FORM_TASK_GRAPH]
+        if has_prior_skills:
+            seq.append(SKILL_MATCH)
+        seq.extend([FORM_PLAN, FORM_EXEC_WRITE, SKILL_FORM_VALIDATION])
+        return self._make_llm(seq, captured)
 
     def _ask(self, q, d, u):
         return {}
@@ -1128,7 +1150,7 @@ class TestGlobalSkillBankWebApp(unittest.TestCase):
 
         # Run 2: e-commerce project -> should see JWT skill in planner prompt
         captured = []
-        o2 = OrchestratorAgent(llm=self._shop_llm(captured=captured), config=config)
+        o2 = OrchestratorAgent(llm=self._shop_llm(captured=captured, has_prior_skills=True), config=config)
         state2 = o2.run(problem="Build product catalog API", ask_fn=self._ask)
 
         self.assertEqual(state2.completed_tasks, ["t1"])
@@ -1152,12 +1174,12 @@ class TestGlobalSkillBankWebApp(unittest.TestCase):
         o1.run(problem="Build login system", ask_fn=self._ask)
 
         # Run 2: shop -> CRUD skill
-        o2 = OrchestratorAgent(llm=self._shop_llm(), config=config)
+        o2 = OrchestratorAgent(llm=self._shop_llm(has_prior_skills=True), config=config)
         o2.run(problem="Build product catalog", ask_fn=self._ask)
 
         # Run 3: form app -> should see BOTH skills in planner prompt
         captured = []
-        o3 = OrchestratorAgent(llm=self._form_llm(captured=captured), config=config)
+        o3 = OrchestratorAgent(llm=self._form_llm(captured=captured, has_prior_skills=True), config=config)
         o3.run(problem="Build contact form", ask_fn=self._ask)
 
         planner_calls = [
@@ -1177,9 +1199,9 @@ class TestGlobalSkillBankWebApp(unittest.TestCase):
 
         OrchestratorAgent(llm=self._webapp_llm(), config=config).run(
             problem="Build login", ask_fn=self._ask)
-        OrchestratorAgent(llm=self._shop_llm(), config=config).run(
+        OrchestratorAgent(llm=self._shop_llm(has_prior_skills=True), config=config).run(
             problem="Build shop", ask_fn=self._ask)
-        OrchestratorAgent(llm=self._form_llm(), config=config).run(
+        OrchestratorAgent(llm=self._form_llm(has_prior_skills=True), config=config).run(
             problem="Build form", ask_fn=self._ask)
 
         from BrainDock.skill_bank.storage import load_skill_bank

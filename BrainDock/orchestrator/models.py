@@ -38,6 +38,7 @@ class RunConfig:
     per_task_token_budget: int = 80_000
     context_optimization: bool = True
     global_skill_bank_path: str = ""  # empty = derive from output_dir
+    seed_skill_bank_path: str = ""  # empty = use default seed file
 
     def resolve_global_skill_bank_path(self) -> str:
         """Resolved path to the global skill bank file."""
@@ -65,6 +66,7 @@ class RunConfig:
             per_task_token_budget=data.get("per_task_token_budget", 80_000),
             context_optimization=data.get("context_optimization", True),
             global_skill_bank_path=data.get("global_skill_bank_path", ""),
+            seed_skill_bank_path=data.get("seed_skill_bank_path", ""),
         )
 
 

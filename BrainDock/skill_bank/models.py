@@ -17,6 +17,17 @@ class Skill:
     example_code: str = ""
     source_task: str = ""
     usage_count: int = 0
+    category: str = ""
+    success_count: int = 0
+    failure_count: int = 0
+
+    @property
+    def reliability_score(self) -> float:
+        """Success rate. Defaults to 1.0 if no outcome data."""
+        total = self.success_count + self.failure_count
+        if total == 0:
+            return 1.0
+        return self.success_count / total
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -32,6 +43,9 @@ class Skill:
             example_code=data.get("example_code", ""),
             source_task=data.get("source_task", ""),
             usage_count=data.get("usage_count", 0),
+            category=data.get("category", ""),
+            success_count=data.get("success_count", 0),
+            failure_count=data.get("failure_count", 0),
         )
 
 
@@ -53,6 +67,17 @@ class SkillBank:
             if tag_set & set(t.lower() for t in s.tags)
         ]
 
+    def find_by_category(self, prefix: str) -> list[Skill]:
+        """Find skills matching exact category or sub-categories.
+
+        ``"code"`` matches ``"code"`` and ``"code/scaffolding"``.
+        """
+        p = prefix.lower()
+        return [
+            s for s in self.skills
+            if s.category.lower() == p or s.category.lower().startswith(p + "/")
+        ]
+
     def find_by_name(self, query: str) -> list[Skill]:
         """Find skills whose name contains the query string."""
         q = query.lower()
@@ -70,6 +95,24 @@ class SkillBank:
         skill = self.get(skill_id)
         if skill:
             skill.usage_count += 1
+
+    def record_success(self, skill_id: str) -> None:
+        """Record a successful outcome for a skill."""
+        skill = self.get(skill_id)
+        if skill:
+            skill.success_count += 1
+            skill.usage_count += 1
+
+    def record_failure(self, skill_id: str) -> None:
+        """Record a failed outcome for a skill."""
+        skill = self.get(skill_id)
+        if skill:
+            skill.failure_count += 1
+            skill.usage_count += 1
+
+    def get_reliable_skills(self, min_reliability: float = 0.3) -> list[Skill]:
+        """Return skills with reliability score >= min_reliability."""
+        return [s for s in self.skills if s.reliability_score >= min_reliability]
 
     def merge(self, other: SkillBank) -> int:
         """Merge skills from another bank. Returns count of new skills added."""

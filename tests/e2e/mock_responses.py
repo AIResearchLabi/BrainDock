@@ -283,15 +283,21 @@ def make_market_study(task_id: str = "t1") -> str:
 
 # ── Skill Learning response ──────────────────────────────────────────
 
-def make_skill(skill_id: str = "skill_eval") -> str:
+def make_skill(skill_id: str = "skill_eval", category: str = "code/evaluation") -> str:
     return json.dumps({
         "id": skill_id,
         "name": "Expression Evaluation",
         "description": "Evaluate user expressions safely",
         "tags": ["parsing", "evaluation"],
+        "category": category,
         "pattern": "eval with validation",
         "example_code": "def calc(expr): return eval(expr)",
     })
+
+
+def make_skill_match(matches: list[dict] | None = None) -> str:
+    """Return a match_skills response. Empty matches by default."""
+    return json.dumps({"matches": matches or []})
 
 
 # ── Sequenced LLM builder ────────────────────────────────────────────

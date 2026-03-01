@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 
 from BrainDock.skill_bank.models import Skill, SkillBank
 from BrainDock.skill_bank.agent import SkillLearningAgent
-from BrainDock.skill_bank.storage import load_skill_bank, save_skill_bank
+from BrainDock.skill_bank.storage import load_skill_bank, load_with_seeds, save_skill_bank
 from BrainDock.llm import CallableBackend
 
 
@@ -22,6 +22,7 @@ EXTRACT_SKILL_RESPONSE = json.dumps({
     "name": "Retry with Exponential Backoff",
     "description": "Retries a failing operation with exponentially increasing delays. Useful for transient failures in network calls or external services.",
     "tags": ["error-handling", "resilience", "networking"],
+    "category": "workflow/retry",
     "pattern": "for attempt in range(max_retries): try operation; except: sleep(2**attempt); raise after exhaustion",
     "example_code": "import time\ndef retry(fn, max_retries=3):\n    for i in range(max_retries):\n        try:\n            return fn()\n        except Exception:\n            if i == max_retries - 1:\n                raise\n            time.sleep(2 ** i)",
 })
@@ -259,6 +260,7 @@ class TestSkillLearningAgent(unittest.TestCase):
         self.assertEqual(skill.id, "skill_retry_with_backoff")
         self.assertEqual(skill.name, "Retry with Exponential Backoff")
         self.assertIn("error-handling", skill.tags)
+        self.assertEqual(skill.category, "workflow/retry")
         self.assertIn("Implement API retry", skill.source_task)
 
     def test_match_skills(self):
@@ -279,6 +281,192 @@ class TestSkillLearningAgent(unittest.TestCase):
         agent = SkillLearningAgent(llm=make_match_llm())
         matches = agent.match_skills("Some task", SkillBank())
         self.assertEqual(matches, [])
+
+
+class TestSkillCategory(unittest.TestCase):
+    def test_category_roundtrip(self):
+        skill = Skill(id="s1", name="Test", description="Test", category="code/scaffolding")
+        d = skill.to_dict()
+        restored = Skill.from_dict(d)
+        self.assertEqual(restored.category, "code/scaffolding")
+
+    def test_find_by_category_prefix(self):
+        bank = SkillBank()
+        bank.add(Skill(id="s1", name="A", description="A", category="code/scaffolding"))
+        bank.add(Skill(id="s2", name="B", description="B", category="code/testing"))
+        bank.add(Skill(id="s3", name="C", description="C", category="web/scraping"))
+        results = bank.find_by_category("code")
+        self.assertEqual(len(results), 2)
+        ids = {s.id for s in results}
+        self.assertEqual(ids, {"s1", "s2"})
+
+    def test_find_by_category_exact(self):
+        bank = SkillBank()
+        bank.add(Skill(id="s1", name="A", description="A", category="code/scaffolding"))
+        bank.add(Skill(id="s2", name="B", description="B", category="code"))
+        results = bank.find_by_category("code")
+        self.assertEqual(len(results), 2)
+
+    def test_find_by_category_no_match(self):
+        bank = SkillBank()
+        bank.add(Skill(id="s1", name="A", description="A", category="web/scraping"))
+        results = bank.find_by_category("code")
+        self.assertEqual(len(results), 0)
+
+    def test_find_by_category_case_insensitive(self):
+        bank = SkillBank()
+        bank.add(Skill(id="s1", name="A", description="A", category="Code/Scaffolding"))
+        results = bank.find_by_category("code")
+        self.assertEqual(len(results), 1)
+        results2 = bank.find_by_category("CODE")
+        self.assertEqual(len(results2), 1)
+
+    def test_backward_compat_no_category(self):
+        data = {"id": "s1", "name": "Old", "description": "Old skill"}
+        skill = Skill.from_dict(data)
+        self.assertEqual(skill.category, "")
+
+
+class TestReliabilityScoring(unittest.TestCase):
+    def test_reliability_no_data(self):
+        skill = Skill(id="s1", name="A", description="A")
+        self.assertEqual(skill.reliability_score, 1.0)
+
+    def test_reliability_mixed(self):
+        skill = Skill(id="s1", name="A", description="A", success_count=7, failure_count=3)
+        self.assertAlmostEqual(skill.reliability_score, 0.7)
+
+    def test_reliability_all_fail(self):
+        skill = Skill(id="s1", name="A", description="A", success_count=0, failure_count=5)
+        self.assertAlmostEqual(skill.reliability_score, 0.0)
+
+    def test_reliability_all_success(self):
+        skill = Skill(id="s1", name="A", description="A", success_count=5, failure_count=0)
+        self.assertAlmostEqual(skill.reliability_score, 1.0)
+
+    def test_record_success(self):
+        bank = SkillBank()
+        bank.add(Skill(id="s1", name="A", description="A"))
+        bank.record_success("s1")
+        s = bank.get("s1")
+        self.assertEqual(s.success_count, 1)
+        self.assertEqual(s.usage_count, 1)
+
+    def test_record_failure(self):
+        bank = SkillBank()
+        bank.add(Skill(id="s1", name="A", description="A"))
+        bank.record_failure("s1")
+        s = bank.get("s1")
+        self.assertEqual(s.failure_count, 1)
+        self.assertEqual(s.usage_count, 1)
+
+    def test_record_success_nonexistent(self):
+        bank = SkillBank()
+        bank.record_success("nonexistent")  # should not raise
+
+    def test_record_failure_nonexistent(self):
+        bank = SkillBank()
+        bank.record_failure("nonexistent")  # should not raise
+
+    def test_get_reliable_skills_boundary(self):
+        bank = SkillBank()
+        bank.add(Skill(id="s1", name="Boundary", description="A",
+                        success_count=3, failure_count=7))  # 0.3 exactly
+        reliable = bank.get_reliable_skills(0.3)
+        self.assertEqual(len(reliable), 1)
+        self.assertEqual(reliable[0].id, "s1")
+
+    def test_get_reliable_skills(self):
+        bank = SkillBank()
+        bank.add(Skill(id="s1", name="Good", description="A", success_count=9, failure_count=1))
+        bank.add(Skill(id="s2", name="Bad", description="B", success_count=1, failure_count=9))
+        bank.add(Skill(id="s3", name="New", description="C"))  # no data = 1.0
+        reliable = bank.get_reliable_skills(0.3)
+        ids = {s.id for s in reliable}
+        self.assertIn("s1", ids)
+        self.assertNotIn("s2", ids)
+        self.assertIn("s3", ids)
+
+    def test_backward_compat_old_format(self):
+        data = {"id": "s1", "name": "Old", "description": "Old skill"}
+        skill = Skill.from_dict(data)
+        self.assertEqual(skill.success_count, 0)
+        self.assertEqual(skill.failure_count, 0)
+        self.assertEqual(skill.reliability_score, 1.0)
+
+    def test_full_roundtrip_with_new_fields(self):
+        skill = Skill(
+            id="s1", name="Full", description="Full test",
+            tags=["a"], category="code/test",
+            success_count=10, failure_count=2, usage_count=12,
+        )
+        d = skill.to_dict()
+        restored = Skill.from_dict(d)
+        self.assertEqual(restored.category, "code/test")
+        self.assertEqual(restored.success_count, 10)
+        self.assertEqual(restored.failure_count, 2)
+        self.assertAlmostEqual(restored.reliability_score, 10 / 12)
+
+
+class TestSeedBank(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def _write_json(self, path, data):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(data, f)
+
+    def test_load_with_seeds_no_runtime(self):
+        seed_path = os.path.join(self._tmpdir, "seeds.json")
+        runtime_path = os.path.join(self._tmpdir, "runtime.json")
+        self._write_json(seed_path, {
+            "skills": [
+                {"id": "seed1", "name": "Seed Skill", "description": "From seeds", "category": "code/test"}
+            ]
+        })
+        bank = load_with_seeds(runtime_path, seed_path)
+        self.assertEqual(len(bank.skills), 1)
+        self.assertEqual(bank.get("seed1").name, "Seed Skill")
+
+    def test_runtime_overrides_seed(self):
+        seed_path = os.path.join(self._tmpdir, "seeds.json")
+        runtime_path = os.path.join(self._tmpdir, "runtime.json")
+        self._write_json(seed_path, {
+            "skills": [
+                {"id": "s1", "name": "Seed Version", "description": "Original"}
+            ]
+        })
+        self._write_json(runtime_path, {
+            "skills": [
+                {"id": "s1", "name": "Runtime Version", "description": "Updated"},
+                {"id": "s2", "name": "New Skill", "description": "Only in runtime"}
+            ]
+        })
+        bank = load_with_seeds(runtime_path, seed_path)
+        self.assertEqual(bank.get("s1").name, "Runtime Version")
+        self.assertIsNotNone(bank.get("s2"))
+
+    def test_missing_seed_file(self):
+        runtime_path = os.path.join(self._tmpdir, "runtime.json")
+        seed_path = os.path.join(self._tmpdir, "nonexistent_seeds.json")
+        self._write_json(runtime_path, {
+            "skills": [
+                {"id": "s1", "name": "Runtime", "description": "Only runtime"}
+            ]
+        })
+        bank = load_with_seeds(runtime_path, seed_path)
+        self.assertEqual(len(bank.skills), 1)
+        self.assertEqual(bank.get("s1").name, "Runtime")
+
+    def test_both_files_missing(self):
+        runtime_path = os.path.join(self._tmpdir, "nonexistent_runtime.json")
+        seed_path = os.path.join(self._tmpdir, "nonexistent_seeds.json")
+        bank = load_with_seeds(runtime_path, seed_path)
+        self.assertEqual(len(bank.skills), 0)
 
 
 if __name__ == "__main__":
