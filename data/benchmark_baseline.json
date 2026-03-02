@@ -1,0 +1,75 @@
+{
+  "timestamp": "2026-03-01T14:04:50.563549+00:00",
+  "scenarios": {
+    "happy_path": {
+      "total_tokens": 8888,
+      "total_llm_calls": 7,
+      "reflection_count": 0,
+      "debate_count": 0,
+      "escalation_count": 0
+    },
+    "multi_task_deps": {
+      "total_tokens": 18178,
+      "total_llm_calls": 15,
+      "reflection_count": 0,
+      "debate_count": 0,
+      "escalation_count": 0
+    },
+    "reflection_retry": {
+      "total_tokens": 11939,
+      "total_llm_calls": 9,
+      "reflection_count": 1,
+      "debate_count": 0,
+      "escalation_count": 0
+    },
+    "reflection_exhausted": {
+      "total_tokens": 14106,
+      "total_llm_calls": 10,
+      "reflection_count": 2,
+      "debate_count": 0,
+      "escalation_count": 1
+    },
+    "debate_path": {
+      "total_tokens": 12644,
+      "total_llm_calls": 10,
+      "reflection_count": 0,
+      "debate_count": 1,
+      "escalation_count": 0
+    },
+    "token_budget_pressure": {
+      "total_tokens": 5029,
+      "total_llm_calls": 4,
+      "reflection_count": 0,
+      "debate_count": 0,
+      "escalation_count": 0
+    },
+    "three_task_chain": {
+      "total_tokens": 18077,
+      "total_llm_calls": 15,
+      "reflection_count": 0,
+      "debate_count": 0,
+      "escalation_count": 0
+    },
+    "multi_step_plan": {
+      "total_tokens": 9115,
+      "total_llm_calls": 7,
+      "reflection_count": 0,
+      "debate_count": 0,
+      "escalation_count": 0
+    },
+    "skill_reuse": {
+      "total_tokens": 13499,
+      "total_llm_calls": 11,
+      "reflection_count": 0,
+      "debate_count": 0,
+      "escalation_count": 0
+    },
+    "needs_human": {
+      "total_tokens": 9408,
+      "total_llm_calls": 7,
+      "reflection_count": 1,
+      "debate_count": 0,
+      "escalation_count": 1
+    }
+  }
+}

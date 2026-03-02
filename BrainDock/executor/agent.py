@@ -19,6 +19,26 @@ from .prompts import (
 from .sandbox import run_sandboxed, write_file_safe, read_file_safe, _looks_like_description, _looks_like_shell_command
 
 
+def _smart_truncate(text: str, limit: int = 2000) -> str:
+    """Truncate text keeping both head and tail for better diagnostics.
+
+    For command output, the end usually contains the test result summary
+    (e.g. "Ran 42 tests... OK" or "FAILED (errors=1)") which is critical
+    for reflection. Keeping only the head loses this.
+    """
+    if len(text) <= limit:
+        return text
+    head_size = limit * 3 // 4  # 75% from the start
+    tail_size = max(0, limit - head_size - 30)  # 25% from the end, minus separator
+    if tail_size == 0:
+        return text[:limit]
+    return (
+        text[:head_size]
+        + "\n\n... [truncated] ...\n\n"
+        + text[-tail_size:]
+    )
+
+
 class _ExecutionSession:
     """Tracks accumulated context across batches within a task."""
 
@@ -164,6 +184,10 @@ class ExecutorAgent(BaseAgent):
                    "Import validation failed in")
         return any(m in output for m in markers)
 
+    _VALID_ACTION_TYPES = frozenset({
+        "write_file", "edit_file", "create_dir", "run_command", "test", "skip",
+    })
+
     def _apply_action(self, data: dict, project_dir: str, step_id: str = "") -> TaskOutcome:
         """Apply a single action dict (from LLM response) to the filesystem."""
         action_type = data.get("action_type", "")
@@ -171,12 +195,22 @@ class ExecutorAgent(BaseAgent):
         content = data.get("content", "")
         affected_file = ""
 
+        # Validate action_type — reject unknown types instead of silently succeeding
+        if action_type and action_type not in self._VALID_ACTION_TYPES and not data.get("_auto_skip"):
+            return TaskOutcome(
+                step_id=data.get("step_id", step_id),
+                success=False,
+                error=f"Unknown action_type '{action_type}'. Expected one of: {', '.join(sorted(self._VALID_ACTION_TYPES))}",
+                action_type=action_type,
+            )
+
         # Handle auto-skip (LLM indicated work was already done)
         if action_type == "skip" or data.get("_auto_skip"):
             return TaskOutcome(
                 step_id=data.get("step_id", step_id),
                 success=True,
                 output=content or "(skipped — already complete)",
+                action_type="skip",
             )
 
         if action_type == "write_file" and file_path:
@@ -197,14 +231,27 @@ class ExecutorAgent(BaseAgent):
             if content.startswith("```"):
                 lines = content.split("\n")
                 content = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:]).strip()
+            # Sanitize doubled paths: LLM sometimes uses absolute paths that
+            # include project_dir, causing doubled paths when run from cwd=project_dir
+            if project_dir and project_dir in content:
+                import os
+                abs_proj = os.path.abspath(project_dir)
+                # Replace absolute project paths with relative equivalents
+                content = content.replace(abs_proj + "/", "")
+                content = content.replace(abs_proj, ".")
             # Guard against descriptions sneaking in as run_command content
             # but allow actual shell commands through
             if not _looks_like_shell_command(content) and _looks_like_description(content):
                 # Check if this is an "already done" response masquerading as run_command
                 _lower_content = content[:200].lower()
-                _done_markers = ("all", "already", "complete", "pass", "tests pass",
-                                 "no changes", "nothing to", "verified")
-                if any(_lower_content.startswith(m) or m in _lower_content for m in _done_markers):
+                # Use phrase-level markers to avoid false positives from short words
+                _done_markers = (
+                    "already complete", "already done", "already exists",
+                    "all tests pass", "tests pass", "no changes needed",
+                    "nothing to do", "nothing to run", "verified successfully",
+                    "work already complete", "no action needed",
+                )
+                if any(m in _lower_content for m in _done_markers):
                     # Treat as successful skip — the LLM is reporting results, not a command
                     success = True
                     output = f"(auto-skip: LLM reported results instead of command) {content[:200]}"
@@ -219,16 +266,28 @@ class ExecutorAgent(BaseAgent):
                     content, cwd=project_dir,
                     timeout=self.stop_condition.timeout_seconds,
                 )
+                # For test actions: "Ran 0 tests" means test discovery found nothing,
+                # which is almost certainly wrong (tests should exist)
+                if success and action_type == "test" and "Ran 0 tests" in output:
+                    success = False
+                    output += "\n(Marked as failure: test step ran 0 tests — likely wrong test path or missing test file)"
         else:
-            success = True
-            output = content or "(no output)"
+            # Empty or missing action_type with no auto_skip — likely malformed LLM response
+            if not action_type:
+                success = False
+                output = f"Missing action_type in LLM response. Got keys: {list(data.keys())}"
+            else:
+                # Matched a valid type but missing required fields (e.g., write_file without file_path)
+                success = False
+                output = f"Action '{action_type}' missing required fields (file_path or content)"
 
         return TaskOutcome(
             step_id=data.get("step_id", step_id),
             success=success,
-            output=output[:2000],
-            error="" if success else output[:500],
+            output=_smart_truncate(output, 2000),
+            error="" if success else _smart_truncate(output, 500),
             affected_file=affected_file,
+            action_type=action_type or "unknown",
         )
 
     def _retry_step_validation(
@@ -239,13 +298,27 @@ class ExecutorAgent(BaseAgent):
         project_dir: str,
     ) -> TaskOutcome:
         """Re-query the LLM for a single step that failed content validation."""
+        # Include existing file content so the LLM can produce a proper update
+        file_path = action_data.get("file_path", "")
+        existing_ctx = ""
+        if file_path:
+            existing = read_file_safe(file_path, project_dir)
+            if existing is not None:
+                existing_ctx = (
+                    f"Current content of {file_path}:\n"
+                    f"---\n{existing[:4000]}\n---"
+                )
+            else:
+                existing_ctx = f"(File {file_path} does not yet exist — write it from scratch.)"
+
         prompt = RETRY_VALIDATION_PROMPT.format(
             validation_error=validation_error,
             step_json=json.dumps(step, indent=2),
             project_dir=project_dir,
             step_id=step.get("id", ""),
             action_type=action_data.get("action_type", "write_file"),
-            file_path=action_data.get("file_path", ""),
+            file_path=file_path,
+            existing_file_context=existing_ctx,
         )
         try:
             data = self._llm_query_json(self._sys_prompt, prompt)
@@ -400,15 +473,36 @@ class ExecutorAgent(BaseAgent):
             ]
 
         outcomes: list[TaskOutcome] = []
+
+        # If LLM returned a single auto-skip covering all steps, broadcast it
+        if (len(actions) == 1 and len(steps) > 1
+                and actions[0].get("_auto_skip")):
+            actions = [
+                {**actions[0], "step_id": s.get("id", "")}
+                for s in steps
+            ]
+
+        if len(actions) < len(steps):
+            import sys
+            print(
+                f"  [Executor] WARNING: LLM returned {len(actions)} actions "
+                f"for {len(steps)} steps — {len(steps) - len(actions)} steps "
+                f"will be marked as incomplete",
+                file=sys.stderr,
+            )
         for i, step in enumerate(steps):
             if i < len(actions):
                 action_data = actions[i]
             else:
-                action_data = {
-                    "action_type": "skip",
-                    "step_id": step.get("id", ""),
-                    "content": "(no action returned by LLM)",
-                }
+                # LLM didn't return enough actions — treat as failure so reflection can handle it
+                outcomes.append(TaskOutcome(
+                    step_id=step.get("id", ""),
+                    success=False,
+                    output=f"LLM returned {len(actions)} actions for {len(steps)} steps — this step was not addressed",
+                    error=f"Missing action from LLM (step {i+1} of {len(steps)})",
+                    action_type="missing",
+                ))
+                continue
             outcome = self._apply_action(action_data, project_dir, step.get("id", ""))
 
             # Step-level retry: if validation rejected the content, re-query

@@ -41,8 +41,23 @@ CRITICAL — Shell command rules:
 - NEVER put test results, summaries, or descriptions as the command.
 - BAD: "content": "All tests passed successfully"
 - GOOD: "content": "python -m unittest discover -s tests -v"
-- Use POSIX-compatible shell syntax. Avoid bash-specific features like \
-arrays, process substitution, or $() subshells where possible."""
+- Use STRICTLY POSIX-compatible shell syntax. Generated code may run under \
+/bin/sh, so you MUST avoid ALL bash-specific features:
+  - NO parentheses for grouping: ( cmd1 && cmd2 )
+  - NO [[ ]] double-bracket tests — use [ ] instead
+  - NO arrays: arr=(a b c)
+  - NO process substitution: <(cmd) or >(cmd)
+  - NO $() if avoidable — use backticks or rewrite as separate commands
+  - NO local keyword — use plain variable assignment
+  - NO function keyword — use funcname() {{ ... }}
+- If you need to run multiple commands, use && or ; to chain them.
+
+CRITICAL — Test command scoping:
+- For test / run_command steps that run tests, ONLY run tests relevant to \
+the current task's module. NEVER run the full test suite.
+- BAD: "python -m unittest discover -s tests -v" (runs ALL tests, slow)
+- GOOD: "python -m unittest tests.outreach.test_whatsapp -v" (module-scoped)
+- The full test suite can have 500+ tests and will timeout at 300s."""
 
 
 EXECUTE_STEP_PROMPT = """\
@@ -73,6 +88,13 @@ NOT a description of it. If it involves running a command, include the exact \
 command. If editing an existing file, provide the complete updated file \
 content (not a diff, not a summary).
 
+CRITICAL — Path rules:
+- Commands run from the project directory as working directory (cwd).
+- Use RELATIVE paths in commands, NOT absolute paths.
+- BAD: "python /home/user/project/tests/test_foo.py"
+- GOOD: "python -m unittest tests.outreach.test_foo -v"
+- For file_path fields, always use RELATIVE paths from the project root.
+
 Respond in this exact JSON format:
 {{
   "step_id": "{step_id}",
@@ -102,7 +124,9 @@ Current project files:
 
 For EACH step, produce the implementation. The "content" field for \
 write_file/edit_file actions MUST be the complete, literal source code — \
-NEVER a description or summary. Respond with a JSON ARRAY of action objects, \
+NEVER a description or summary. For test steps, only run tests for the \
+current task's module (e.g. "python -m unittest tests.outreach.test_whatsapp -v"), \
+NEVER the full test suite. Respond with a JSON ARRAY of action objects, \
 one per step, in order:
 [
   {{"step_id": "...", "action_type": "write_file|run_command|edit_file|create_dir|test",
@@ -128,7 +152,8 @@ Project directory: {project_dir}
 {edit_file_context}
 
 The "content" field for write_file/edit_file MUST be the complete, literal \
-source code — NEVER a description or summary.
+source code — NEVER a description or summary. For test steps, only run \
+tests for the current task's module, NEVER the full test suite.
 
 Respond with a JSON ARRAY of action objects, one per step, in order:
 [
@@ -138,8 +163,7 @@ Respond with a JSON ARRAY of action objects, one per step, in order:
 
 
 RETRY_VALIDATION_PROMPT = """\
-Your previous response for this step was REJECTED because the "content" \
-field contained a natural-language description instead of actual source code.
+Your previous response for this step was REJECTED by the content validator.
 
 The validation error was:
 ---
@@ -153,16 +177,27 @@ Step to retry:
 
 Project directory: {project_dir}
 
-You MUST respond with the ACTUAL SOURCE CODE in the "content" field. \
-Do NOT describe what the code does — write the code itself, complete and \
-ready to save to disk.
+{existing_file_context}
+
+WHAT WENT WRONG: You returned a natural-language description or summary \
+instead of actual source code. The "content" field was written verbatim to \
+disk and caused an error.
+
+RULES FOR THIS RETRY:
+1. The "content" field MUST contain the COMPLETE, LITERAL source code of \
+the file -- ready to be saved to disk and executed as-is.
+2. Do NOT describe what the code does. Write the actual code.
+3. If editing an existing file, the "content" MUST be the FULL updated \
+file content (not a diff, not a description of changes).
+4. NEVER use Unicode characters in source code (no arrows, bullets, dashes, \
+smart quotes). ASCII only.
 
 Respond in this exact JSON format:
 {{
   "step_id": "{step_id}",
   "action_type": "{action_type}",
   "file_path": "{file_path}",
-  "content": "THE ACTUAL COMPLETE SOURCE CODE HERE — NOT A DESCRIPTION",
+  "content": "THE ACTUAL COMPLETE SOURCE CODE HERE",
   "verification": "How to verify this step succeeded"
 }}"""
 

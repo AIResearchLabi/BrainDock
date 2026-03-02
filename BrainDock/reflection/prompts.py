@@ -84,4 +84,15 @@ Respond in this exact JSON format:
 }}
 
 If the failure is unrecoverable (e.g., fundamental approach is wrong), set \
-should_retry to false and explain why in the summary."""
+should_retry to false and explain why in the summary.
+
+IMPORTANT — When to set should_retry to FALSE:
+- The same error pattern appeared in a previous reflection attempt
+- The root cause is an environment/shell issue (env_issue) that code changes \
+cannot fix (e.g., /bin/sh syntax errors, missing system packages)
+- The root cause requires human action (auth, credentials, external setup)
+- The fundamental approach is wrong and would require redesigning the task
+
+If previous reflection attempts are shown in the context, do NOT repeat the \
+same fix strategy. Try a fundamentally different approach or set \
+should_retry to false."""

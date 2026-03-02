@@ -276,7 +276,7 @@ SHOP_EXEC_WRITE = json.dumps({
     "step_id": "s1",
     "action_type": "write_file",
     "file_path": "routes.py",
-    "content": "from flask import Flask, jsonify\\napp = Flask(__name__)\\nproducts = []\\n@app.route('/api/products')\\ndef list_products():\\n    return jsonify(products)\\n",
+    "content": "from flask import Flask, jsonify\napp = Flask(__name__)\nproducts = []\n@app.route('/api/products')\ndef list_products():\n    return jsonify(products)\n",
     "verification": "File exists",
 })
 
@@ -353,7 +353,7 @@ FORM_EXEC_WRITE = json.dumps({
     "step_id": "s1",
     "action_type": "write_file",
     "file_path": "form.py",
-    "content": "import re\\ndef validate(data):\\n    errors = {}\\n    if not data.get('email') or not re.match(r'.+@.+', data['email']):\\n        errors['email'] = 'Valid email required'\\n    return errors\\n",
+    "content": "import re\ndef validate(data):\n    errors = {}\n    if not data.get('email') or not re.match(r'.+@.+', data['email']):\n        errors['email'] = 'Valid email required'\n    return errors\n",
     "verification": "File exists",
 })
 

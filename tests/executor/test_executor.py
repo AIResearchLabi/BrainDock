@@ -35,9 +35,19 @@ RUN_COMMAND_RESPONSE = json.dumps({
 })
 
 
+BATCH_RESPONSE = json.dumps([
+    {"step_id": "s1", "action_type": "write_file",
+     "file_path": "src/models.py", "content": "class User:\n    pass\n",
+     "verification": "File exists with User class"},
+    {"step_id": "s2", "action_type": "run_command",
+     "file_path": "", "content": "echo 'hello world'",
+     "verification": "Output contains hello"},
+])
+
+
 def make_executor_llm():
     call_count = {"n": 0}
-    responses = [WRITE_FILE_RESPONSE, RUN_COMMAND_RESPONSE]
+    responses = [BATCH_RESPONSE, RUN_COMMAND_RESPONSE]
 
     def mock_fn(system_prompt, user_prompt):
         idx = min(call_count["n"], len(responses) - 1)
@@ -437,8 +447,9 @@ class TestBatchExecution(unittest.TestCase):
         outcomes = agent._execute_batch(steps, self._tmpdir, session, "ctx")
         self.assertEqual(len(outcomes), 2)
         self.assertTrue(outcomes[0].success)
-        # Second step gets skip fallback — still succeeds
-        self.assertTrue(outcomes[1].success)
+        # Second step marked as failure — LLM didn't return an action for it
+        self.assertFalse(outcomes[1].success)
+        self.assertIn("Missing action", outcomes[1].error)
 
 
 class TestExtractJsonList(unittest.TestCase):

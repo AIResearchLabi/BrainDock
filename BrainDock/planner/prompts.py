@@ -31,6 +31,20 @@ Project context:
 When files already exist in the project, prefer edit_file over write_file to \
 preserve existing code. Reference specific existing files by their paths.
 
+CRITICAL — Test step rules:
+- For "test" steps, ONLY test the module(s) affected by the current task.
+- NEVER plan a "run full test suite" or "run all tests" step.
+- BAD: "Run python -m unittest discover -s tests -v to verify no regressions"
+- GOOD: "Run python -m unittest tests.outreach.test_whatsapp -v to verify QR login tests"
+- The full test suite may have hundreds of tests and will timeout or fail due to \
+unrelated import errors. Always scope tests to the specific module being changed.
+
+CRITICAL — Path rules:
+- In step descriptions, use RELATIVE paths from the project root, not absolute paths.
+- BAD: "Edit /home/user/project/output/idea-market-survey/project/src/agent.py"
+- GOOD: "Edit BrainDock/outreach/agent.py"
+- The executor runs commands from the project directory as working directory.
+
 Create a step-by-step plan. Each step should be a concrete, executable action.
 Rate your confidence and estimate the uncertainty (entropy).
 

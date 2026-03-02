@@ -551,6 +551,7 @@ class OrchestratorAgent:
                 state.token_usage = budget_tracker.get_snapshot()
                 _emit(on_activity, "orchestrator", "task_start", f"Task: {task_node.id} — {task_node.title}")
 
+                exec_result = None  # initialized before try to avoid NameError in post-execution logic
                 try:
                     # ── Refresh project context (full for planner) ────
                     _budget_pct = budget_tracker.get_snapshot()["global_pct"] if self.config.context_optimization else 0
@@ -772,7 +773,7 @@ class OrchestratorAgent:
 
                     # ── Mode 4: Controller (execution gate) ───────────
                     state.current_mode = Mode.CONTROLLER.value
-                    self._save_state(state, output_dir, on_state)
+                    _save_with_budget(state, output_dir)
                     _emit(on_activity, "controller", "mode_change", "Checking execution gate")
                     exec_gate = controller.check_execution_gate(exec_dict)
                     _emit(on_activity, "controller", "gate_result", f"{exec_gate.action}: {exec_gate.reason}")
@@ -974,9 +975,9 @@ class OrchestratorAgent:
                                     # else: falls through to normal failure handling
 
                     # ── Mode 6: Skill Learning ────────────────────────
-                    if exec_result.success and not self.config.skip_skill_learning:
+                    if exec_result is not None and exec_result.success and not self.config.skip_skill_learning:
                         state.current_mode = Mode.SKILL_LEARNING.value
-                        self._save_state(state, output_dir, on_state)
+                        _save_with_budget(state, output_dir)
                         _set_agent("skill_learning")
                         _emit(on_activity, "skill_learning", "mode_change", "Extracting reusable skills")
                         try:
@@ -1000,7 +1001,7 @@ class OrchestratorAgent:
                             _emit(on_activity, "skill_learning", "failed", "Skill extraction failed (non-fatal)", "warning")
 
                     # Record skill outcomes for matched skills
-                    if matched:
+                    if matched and exec_result is not None:
                         matched_ids = [m["skill_id"] for m in matched if skill_bank.get(m["skill_id"])]
                         if exec_result.success:
                             for sid in matched_ids:
@@ -1010,7 +1011,7 @@ class OrchestratorAgent:
                                 skill_bank.record_failure(sid)
 
                     # Track completion
-                    if exec_result.success:
+                    if exec_result is not None and exec_result.success:
                         task_graph.mark_completed(task_node.id)
                         state.completed_tasks.append(task_node.id)
                         _emit(on_activity, "orchestrator", "task_done", f"Task {task_node.id} completed", "success")
@@ -1025,15 +1026,14 @@ class OrchestratorAgent:
                           f"Task {task_node.id} failed with error: {e}", "error")
                     task_graph.mark_failed(task_node.id)
                     state.failed_tasks.append(task_node.id)
-                    self._save_state(state, output_dir, on_state)
+                    _save_with_budget(state, output_dir)
 
                 # Reset reflection for next task
                 reflection_agent.reset()
 
         # Update final task graph state
         state.task_graph = task_graph.to_dict()
-        state.token_usage = budget_tracker.get_snapshot()
-        self._save_state(state, output_dir, on_state)
+        _save_with_budget(state, output_dir)
         _emit(on_activity, "orchestrator", "pipeline_done",
               f"Done: {len(state.completed_tasks)} completed, {len(state.failed_tasks)} failed", "success")
 

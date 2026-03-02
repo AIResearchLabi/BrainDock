@@ -10,6 +10,28 @@ from pathlib import Path
 from .models import VerifyResult
 
 
+def _sanitize_command_for_posix(command: str) -> str:
+    """Rewrite common bash-isms to POSIX-compatible equivalents.
+
+    Many LLM-generated commands use bash syntax that fails under /bin/sh
+    (which Python subprocess uses internally in generated scripts).
+    This rewrites the most common offenders.
+    """
+    cmd = command.strip()
+
+    # Remove outer grouping parentheses: ( cmd1 && cmd2 ) -> cmd1 && cmd2
+    if cmd.startswith("(") and cmd.endswith(")"):
+        inner = cmd[1:-1].strip()
+        # Only unwrap if it looks like a simple command group, not a subshell
+        if ";" in inner or "&&" in inner or "||" in inner:
+            cmd = inner
+
+    # Replace [[ ]] with [ ] for test expressions
+    cmd = re.sub(r'\[\[(.+?)\]\]', r'[ \1 ]', cmd)
+
+    return cmd
+
+
 def run_sandboxed(
     command: str,
     cwd: str,
@@ -25,6 +47,7 @@ def run_sandboxed(
     Returns:
         Tuple of (success, output_text).
     """
+    command = _sanitize_command_for_posix(command)
     try:
         result = subprocess.run(
             command,
@@ -549,13 +572,26 @@ def verify_project(
         )
 
     except subprocess.TimeoutExpired:
-        # Timeout = server stayed alive = success
+        # For server-like commands (npm start, gunicorn, flask, uvicorn),
+        # timeout means the server stayed alive = success.
+        # For test/script commands (python main.py, make), timeout is a failure.
+        _SERVER_INDICATORS = ("npm start", "flask run", "uvicorn", "gunicorn",
+                              "celery", "redis-server", "nginx", "serve")
+        is_server = any(ind in command for ind in _SERVER_INDICATORS)
+        if is_server:
+            return VerifyResult(
+                success=True,
+                command=command,
+                exit_code=0,
+                detection_method=detection_method,
+                error_summary="Process timed out (assumed running server)",
+            )
         return VerifyResult(
-            success=True,
+            success=False,
             command=command,
-            exit_code=0,
+            exit_code=-1,
             detection_method=detection_method,
-            error_summary="Process timed out (assumed running server)",
+            error_summary=f"Command timed out after {timeout}s (not a server command)",
         )
     except Exception as e:
         return VerifyResult(

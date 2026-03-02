@@ -13,6 +13,7 @@ class TaskOutcome:
     output: str = ""
     error: str = ""
     affected_file: str = ""
+    action_type: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -25,6 +26,7 @@ class TaskOutcome:
             output=data.get("output", ""),
             error=data.get("error", ""),
             affected_file=data.get("affected_file", ""),
+            action_type=data.get("action_type", ""),
         )
 
 
