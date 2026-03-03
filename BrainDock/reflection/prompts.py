@@ -1,12 +1,12 @@
 """Prompt templates for the Reflection Agent."""
 
-SYSTEM_PROMPT = """\
-You are an expert debugger and root-cause analyst. When given a failed execution, \
-you identify what went wrong, why, and how to fix the plan to succeed on retry. \
-You are systematic and thorough in your analysis.
+from BrainDock.prompts_common import JSON_FORMAT_INSTRUCTION
 
-IMPORTANT: Always respond in valid JSON format as specified in each prompt. \
-Do not include any text outside the JSON object."""
+SYSTEM_PROMPT = f"""\
+You are an expert debugger and root-cause analyst. When given a failed execution, \
+you identify what went wrong, why, and how to fix the plan to succeed on retry.
+
+{JSON_FORMAT_INSTRUCTION}"""
 
 
 REFLECT_PROMPT = """\
@@ -34,23 +34,13 @@ Pay special attention to:
 - Existing files that may need editing rather than rewriting
 - File path mismatches between plan and actual project
 
-Analyze the root cause(s) and propose modifications to the plan.
+Root cause categories: missing_dependency, wrong_approach, env_issue, \
+logic_error, config_error, auth_required, credentials_needed, \
+external_setup, physical_action.
 
-Root cause categories:
-- missing_dependency — a package or library is not installed
-- wrong_approach — fundamental design or logic problem
-- env_issue — environment or configuration problem
-- logic_error — bug in the generated code
-- config_error — misconfiguration in files or settings
-- auth_required — requires authentication tokens, API keys, or login
-- credentials_needed — requires secrets, passwords, or access credentials
-- external_setup — requires external service setup (database, cloud, DNS, etc.)
-- physical_action — requires a physical or manual action by the user
-
-When the root cause requires human action (auth_required, credentials_needed, \
-external_setup, or physical_action), set "needs_human" to true, "should_retry" \
-to false, and provide a clear "escalation_reason" explaining what the human \
-needs to do.
+When root cause requires human action (auth_required, credentials_needed, \
+external_setup, physical_action), set needs_human=true, should_retry=false, \
+and provide escalation_reason.
 
 Respond in this exact JSON format:
 {{
@@ -83,16 +73,7 @@ Respond in this exact JSON format:
   }}
 }}
 
-If the failure is unrecoverable (e.g., fundamental approach is wrong), set \
-should_retry to false and explain why in the summary.
+Set should_retry=false when: same error pattern recurred, env/shell issue \
+code can't fix, human action required, or fundamental redesign needed.
 
-IMPORTANT — When to set should_retry to FALSE:
-- The same error pattern appeared in a previous reflection attempt
-- The root cause is an environment/shell issue (env_issue) that code changes \
-cannot fix (e.g., /bin/sh syntax errors, missing system packages)
-- The root cause requires human action (auth, credentials, external setup)
-- The fundamental approach is wrong and would require redesigning the task
-
-If previous reflection attempts are shown in the context, do NOT repeat the \
-same fix strategy. Try a fundamentally different approach or set \
-should_retry to false."""
+If previous reflections are shown, do NOT repeat the same fix strategy."""

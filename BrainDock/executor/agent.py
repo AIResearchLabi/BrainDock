@@ -72,13 +72,19 @@ class _ExecutionSession:
         return self._char_count > self._limit
 
     def compress(self):
-        """Keep last 3 entries verbatim, summarize older ones."""
+        """Keep last 3 entries verbatim, summarize older ones with outcomes."""
         if len(self._entries) <= 3:
             return
         old_entries = self._entries[:-3]
+        # Include step outcomes in summary for better reflection context
+        summaries = []
+        for e in old_entries:
+            # Each entry is like "[s1] write_file -> OK: ..." — keep the key parts
+            parts = e.split(":", 1)
+            summaries.append(parts[0].strip() if len(parts) > 1 else e[:60])
         summary = (
             f"[Completed {len(old_entries)} earlier steps: "
-            + ", ".join(e.split("]")[0].strip("[") for e in old_entries)
+            + ", ".join(summaries)
             + "]"
         )
         self._compressed_summary = summary
@@ -322,7 +328,7 @@ class ExecutorAgent(BaseAgent):
         )
         try:
             data = self._llm_query_json(self._sys_prompt, prompt)
-        except RuntimeError:
+        except (RuntimeError, ValueError):
             return TaskOutcome(
                 step_id=step.get("id", ""),
                 success=False,
@@ -332,6 +338,14 @@ class ExecutorAgent(BaseAgent):
         # Handle case where LLM returns a list instead of a dict
         if isinstance(data, list):
             data = data[0] if data else {}
+        # Type guard: ensure data is a dict before passing to _apply_action
+        if not isinstance(data, dict):
+            return TaskOutcome(
+                step_id=step.get("id", ""),
+                success=False,
+                output=f"Retry returned non-dict response: {type(data).__name__}",
+                error="Retry returned non-dict response",
+            )
         return self._apply_action(data, project_dir, step.get("id", ""))
 
     def _build_edit_file_context(self, steps: list[dict], project_dir: str) -> str:
@@ -482,6 +496,16 @@ class ExecutorAgent(BaseAgent):
                 for s in steps
             ]
 
+        # Guard: if all actions are skips, warn — may indicate LLM confusion
+        skip_count = sum(1 for a in actions if a.get("_auto_skip") or a.get("action_type") == "skip")
+        if skip_count == len(actions) and len(actions) > 1:
+            import sys
+            print(
+                f"  [Executor] WARNING: All {len(actions)} actions are skips — "
+                f"possible LLM confusion (task may not actually be complete)",
+                file=sys.stderr,
+            )
+
         if len(actions) < len(steps):
             import sys
             print(
@@ -590,15 +614,22 @@ class ExecutorAgent(BaseAgent):
             # Drain pending user guidance at each batch checkpoint
             user_guidance = ""
             if check_guidance:
-                messages = check_guidance()
-                if messages:
-                    user_guidance = "\n".join(f"- {m}" for m in messages)
+                try:
+                    messages = check_guidance()
+                    if messages:
+                        user_guidance = "\n".join(f"- {m}" for m in messages)
+                except Exception as _guidance_err:
+                    import sys
+                    print(f"  [Executor] check_guidance failed: {_guidance_err}", file=sys.stderr)
 
             batch_outcomes = self._execute_batch(
                 batch, project_dir, session, project_file_context,
                 user_guidance=user_guidance,
             )
 
+            # Record ALL outcomes from the batch before checking stop conditions.
+            # The batch was already executed (side effects applied), so we must
+            # track everything for accurate reflection and reporting.
             for outcome in batch_outcomes:
                 outcomes.append(outcome)
                 steps_done += 1
@@ -606,10 +637,19 @@ class ExecutorAgent(BaseAgent):
                     generated_files.append(outcome.affected_file)
                 if not outcome.success:
                     failure_count += 1
-                if failure_count >= self.stop_condition.max_failures:
-                    break
-                if steps_done >= self.stop_condition.max_steps:
-                    break
+
+            # Check stop conditions AFTER processing the full batch
+            if failure_count >= self.stop_condition.max_failures:
+                return ExecutionResult(
+                    task_id=task_id,
+                    success=False,
+                    outcomes=outcomes,
+                    steps_completed=steps_done,
+                    steps_total=len(steps),
+                    failure_count=failure_count,
+                    stop_reason=f"Max failures ({self.stop_condition.max_failures}) reached",
+                    generated_files=generated_files,
+                )
 
         all_success = failure_count == 0
         return ExecutionResult(

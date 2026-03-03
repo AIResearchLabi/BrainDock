@@ -524,15 +524,13 @@ def scenario_multi_task_deps() -> BenchmarkScenario:
                            "file_path": "core.py", "content": "def calc(x): return x\n",
                            "verification": ""}]),
             m.skill("skill_core"),
-            # t2
-            m.skill_match(),
+            # t2 (skill matching is heuristic, no LLM call)
             m.plan(task_id="t2", task_title="API layer"),
             m.exec_batch([{"step_id": "s1", "action_type": "write_file",
                            "file_path": "api.py", "content": "from core import calc\n",
                            "verification": ""}]),
             m.skill("skill_api"),
             # t3
-            m.skill_match(),
             m.plan(task_id="t3", task_title="CLI wrapper"),
             m.exec_batch([{"step_id": "s1", "action_type": "write_file",
                            "file_path": "main.py", "content": "from api import *\n",
@@ -623,7 +621,7 @@ def scenario_debate_path() -> BenchmarkScenario:
         responses=[
             *m.spec(),
             m.tg(),
-            m.plan(confidence=0.9, entropy=0.8),
+            m.plan(confidence=0.9, entropy=0.9),
             *m.debate(),
             m.exec_batch([{"step_id": "s1_debated", "action_type": "write_file",
                            "file_path": "main.py", "content": "print('safe')\n",
@@ -682,14 +680,12 @@ def scenario_three_task_chain() -> BenchmarkScenario:
             m.exec_batch([{"step_id": "s1", "action_type": "write_file",
                            "file_path": "a.py", "content": "# A\n", "verification": ""}]),
             m.skill("skill_a"),
-            # t2
-            m.skill_match(),
+            # t2 (skill matching is heuristic, no LLM call)
             m.plan(task_id="t2", task_title="Module B"),
             m.exec_batch([{"step_id": "s1", "action_type": "write_file",
                            "file_path": "b.py", "content": "# B\n", "verification": ""}]),
             m.skill("skill_b"),
             # t3
-            m.skill_match(),
             m.plan(task_id="t3", task_title="Module C"),
             m.exec_batch([{"step_id": "s1", "action_type": "write_file",
                            "file_path": "c.py", "content": "# C\n", "verification": ""}]),
@@ -757,11 +753,7 @@ def scenario_skill_reuse() -> BenchmarkScenario:
                            "file_path": "core.py", "content": "def calc(x): return x\n",
                            "verification": ""}]),
             m.skill("skill_core"),
-            # t2 — skill_match returns a match
-            m.skill_match(matches=[
-                {"skill_id": "skill_core", "relevance": "high",
-                 "application": "Reuse core eval pattern"},
-            ]),
+            # t2 (skill matching is heuristic, no LLM call)
             m.plan(task_id="t2", task_title="CLI wrapper"),
             m.exec_batch([{"step_id": "s1", "action_type": "write_file",
                            "file_path": "main.py", "content": "from core import calc\n",

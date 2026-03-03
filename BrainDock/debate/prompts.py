@@ -1,12 +1,13 @@
 """Prompt templates for the Debate Agent."""
 
-SYSTEM_PROMPT = """\
+from BrainDock.prompts_common import JSON_FORMAT_INSTRUCTION
+
+SYSTEM_PROMPT = f"""\
 You are a panel of expert software architects debating the best approach \
 to implement a task. You consider multiple perspectives, identify trade-offs, \
 and converge on the strongest approach through structured critique.
 
-IMPORTANT: Always respond in valid JSON format as specified in each prompt. \
-Do not include any text outside the JSON object."""
+{JSON_FORMAT_INSTRUCTION}"""
 
 
 PROPOSE_PROMPT = """\
@@ -100,7 +101,7 @@ Original plan:
 {plan_json}
 ---
 
-Create a final improved plan that incorporates the best insights from the debate.
+Create a final improved plan incorporating the best insights from the debate.
 
 Respond in this exact JSON format:
 {{

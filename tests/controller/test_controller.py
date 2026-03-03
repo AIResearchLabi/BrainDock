@@ -16,7 +16,7 @@ class TestGateThresholds(unittest.TestCase):
     def test_defaults(self):
         t = GateThresholds()
         self.assertAlmostEqual(t.min_confidence, 0.6)
-        self.assertAlmostEqual(t.max_entropy, 0.7)
+        self.assertAlmostEqual(t.max_entropy, 0.85)
         self.assertEqual(t.max_failures, 3)
 
     def test_roundtrip(self):

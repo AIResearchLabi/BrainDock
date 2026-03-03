@@ -10,7 +10,7 @@ from typing import Any
 
 
 class Mode(str, Enum):
-    """The 8 modes of the BrainDock pipeline."""
+    """The 9 modes of the BrainDock pipeline."""
     SPECIFICATION = "specification"     # Mode 1
     TASK_GRAPH = "task_graph"           # Mode 2
     PLANNING = "planning"               # Mode 3
@@ -19,6 +19,7 @@ class Mode(str, Enum):
     SKILL_LEARNING = "skill_learning"   # Mode 6
     REFLECTION = "reflection"           # Mode 7
     DEBATE = "debate"                   # Mode 8
+    OUTREACH = "outreach"              # Mode 9
 
 
 @dataclass
@@ -29,7 +30,7 @@ class RunConfig:
     max_reflection_iterations: int = 2
     max_debate_rounds: int = 3
     min_confidence: float = 0.6
-    max_entropy: float = 0.7
+    max_entropy: float = 0.85
     skip_execution: bool = False
     skip_skill_learning: bool = False
     enable_human_escalation: bool = True
@@ -57,7 +58,7 @@ class RunConfig:
             max_reflection_iterations=data.get("max_reflection_iterations", 2),
             max_debate_rounds=data.get("max_debate_rounds", 3),
             min_confidence=data.get("min_confidence", 0.6),
-            max_entropy=data.get("max_entropy", 0.7),
+            max_entropy=data.get("max_entropy", 0.85),
             skip_execution=data.get("skip_execution", False),
             skip_skill_learning=data.get("skip_skill_learning", False),
             enable_human_escalation=data.get("enable_human_escalation", True),
@@ -93,6 +94,7 @@ class PipelineState:
     reflections: list[dict] = field(default_factory=list)
     debates: list[dict] = field(default_factory=list)
     market_studies: list[dict] = field(default_factory=list)
+    outreach_results: list[dict] = field(default_factory=list)
     completed_tasks: list[str] = field(default_factory=list)
     failed_tasks: list[str] = field(default_factory=list)
     verification_results: list[dict] = field(default_factory=list)
@@ -110,7 +112,8 @@ class PipelineState:
             "title", "problem",
             "current_mode", "spec", "task_graph", "plans",
             "execution_results", "learned_skills", "reflections",
-            "debates", "market_studies", "completed_tasks", "failed_tasks",
+            "debates", "market_studies", "outreach_results",
+            "completed_tasks", "failed_tasks",
             "verification_results", "escalations", "token_usage", "error",
         ):
             if key in data:

@@ -51,7 +51,7 @@ class StopCondition:
     max_steps: int = 50
     max_failures: int = 3
     timeout_seconds: int = 300
-    batch_size: int = 4
+    batch_size: int = 8
     session_token_limit: int = 8000
 
     def to_dict(self) -> dict:
@@ -63,7 +63,7 @@ class StopCondition:
             max_steps=data.get("max_steps", 50),
             max_failures=data.get("max_failures", 3),
             timeout_seconds=data.get("timeout_seconds", 300),
-            batch_size=data.get("batch_size", 4),
+            batch_size=data.get("batch_size", 8),
             session_token_limit=data.get("session_token_limit", 8000),
         )
 

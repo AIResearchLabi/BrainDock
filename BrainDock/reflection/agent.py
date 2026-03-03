@@ -12,6 +12,7 @@ from .prompts import SYSTEM_PROMPT, REFLECT_PROMPT
 
 MAX_ITERATIONS = 2
 _MAX_ERROR_HISTORY = 50  # Cap error history to prevent unbounded growth
+_MAX_REFLECTION_HISTORY = 50  # Cap reflection history to prevent unbounded growth
 
 # Error signatures that indicate environment/shell issues unlikely to be
 # fixed by retrying with a modified plan alone.
@@ -144,6 +145,7 @@ class ReflectionAgent(BaseAgent):
 
         # Track for next iteration
         self._previous_reflections.append(result.to_dict())
+        self._previous_reflections = self._previous_reflections[-_MAX_REFLECTION_HISTORY:]
         self._previous_errors.extend(
             self._extract_error_signatures(execution_result)
         )

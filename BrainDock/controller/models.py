@@ -18,7 +18,7 @@ class GateAction(str, Enum):
 class GateThresholds:
     """Configurable thresholds for quality gates."""
     min_confidence: float = 0.6
-    max_entropy: float = 0.7
+    max_entropy: float = 0.85
     max_failures: int = 3
     max_reflection_iterations: int = 2
     max_debate_rounds: int = 3
@@ -30,7 +30,7 @@ class GateThresholds:
     def from_dict(cls, data: dict) -> GateThresholds:
         return cls(
             min_confidence=data.get("min_confidence", 0.6),
-            max_entropy=data.get("max_entropy", 0.7),
+            max_entropy=data.get("max_entropy", 0.85),
             max_failures=data.get("max_failures", 3),
             max_reflection_iterations=data.get("max_reflection_iterations", 2),
             max_debate_rounds=data.get("max_debate_rounds", 3),

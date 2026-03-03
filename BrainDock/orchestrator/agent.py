@@ -492,6 +492,13 @@ class OrchestratorAgent:
                     state.completed_tasks.remove(tid)
                     if tid not in state.failed_tasks:
                         state.failed_tasks.append(tid)
+                    # Clear stale execution/verification results so retry gets clean context
+                    state.execution_results = [
+                        er for er in state.execution_results if er.get("task_id") != tid
+                    ]
+                    state.verification_results = [
+                        vr for vr in state.verification_results if vr.get("task_id") != tid
+                    ]
                     _emit(on_activity, "orchestrator", "task_retry",
                           f"Task {tid} marked for retry due to corrupted output files", "warning")
 
@@ -521,6 +528,14 @@ class OrchestratorAgent:
         )
         skill_agent = SkillLearningAgent(llm=llm)
         market_study_agent = MarketStudyAgent(llm=llm)
+
+        # On resume: reset failed tasks to "pending" so get_parallel_groups()
+        # includes them for retry (fix #42 — failed tasks excluded by status filter)
+        if resumed_state:
+            for tid in list(state.failed_tasks):
+                tnode = task_graph.get_task(tid)
+                if tnode and tnode.status == "failed":
+                    tnode.status = "pending"
 
         groups = task_graph.get_parallel_groups()
 
@@ -573,7 +588,8 @@ class OrchestratorAgent:
                         return state
                     if _budget_action == "skip":
                         task_graph.mark_failed(task_node.id)
-                        state.failed_tasks.append(task_node.id)
+                        if task_node.id not in state.failed_tasks:
+                            state.failed_tasks.append(task_node.id)
                         self._save_state(state, output_dir, on_state)
                         continue
 
@@ -646,6 +662,8 @@ class OrchestratorAgent:
                         if _budget_action != "skip":
                             _set_agent("market_study")
                             _emit(on_activity, "market_study", "mode_change", f"Market study for task: {task_node.id}")
+                            # Refresh budget_pct (may have changed since planning)
+                            _budget_pct = budget_tracker.get_snapshot()["global_pct"] if self.config.context_optimization else 0
                             _ms_profile = _adaptive_profile(ContextProfile.LIGHT, _budget_pct) if self.config.context_optimization else ContextProfile.FULL
                             _ms_context = _build_project_context(
                                 state.spec, project_dir,
@@ -665,6 +683,11 @@ class OrchestratorAgent:
                     gate_result = controller.check_plan_gate(plan_dict)
                     _emit(on_activity, "controller", "gate_result", f"{gate_result.action}: {gate_result.reason}")
 
+                    # ── Handle plan gate "reflect" (low confidence) ──
+                    if gate_result.action == "reflect":
+                        _emit(on_activity, "controller", "warning",
+                              f"Plan has low confidence ({gate_result.reason}), proceeding with caution", "warning")
+
                     # ── Mode 8: Debate (if entropy too high) ──────────
                     if gate_result.action == "debate":
                         debate_gate = controller.check_debate_gate()
@@ -683,6 +706,8 @@ class OrchestratorAgent:
                                 _set_agent("debate")
                                 _emit(on_activity, "debate", "mode_change", "Starting multi-perspective debate")
                                 controller.state.record_debate()
+                                # Refresh budget_pct for debate context
+                                _budget_pct = budget_tracker.get_snapshot()["global_pct"] if self.config.context_optimization else 0
                                 _db_profile = _adaptive_profile(ContextProfile.LIGHT, _budget_pct) if self.config.context_optimization else ContextProfile.FULL
                                 _db_context = _build_project_context(
                                     state.spec, project_dir,
@@ -708,7 +733,8 @@ class OrchestratorAgent:
                         return state
                     if _budget_action == "skip":
                         task_graph.mark_failed(task_node.id)
-                        state.failed_tasks.append(task_node.id)
+                        if task_node.id not in state.failed_tasks:
+                            state.failed_tasks.append(task_node.id)
                         self._save_state(state, output_dir, on_state)
                         continue
 
@@ -960,17 +986,20 @@ class OrchestratorAgent:
                                         profile=_hint_profile,
                                     )
                                     hint_context += f"\n\nHuman guidance: {esc_hint}"
+                                    # Use original plan for human-guided retry, not the
+                                    # last failed modified plan (fix #51)
                                     retry_result = executor.execute(
-                                        current_plan,
+                                        plan_dict,
                                         project_dir=project_dir,
                                         project_file_context=hint_context,
                                     )
                                     state.execution_results.append(retry_result.to_dict())
                                     verify_result = verify_project(project_dir, timeout=10)
                                     state.verification_results.append(verify_result.to_dict())
+                                    # Always update exec_result to reflect latest attempt (fix #49)
+                                    exec_result = retry_result
+                                    exec_dict = exec_result.to_dict()
                                     if retry_result.success and verify_result.success:
-                                        exec_result = retry_result
-                                        exec_dict = exec_result.to_dict()
                                         _emit(on_activity, "executor", "completed", "Human-guided retry succeeded", "success")
                                     # else: falls through to normal failure handling
 
@@ -1010,22 +1039,30 @@ class OrchestratorAgent:
                             for sid in matched_ids:
                                 skill_bank.record_failure(sid)
 
-                    # Track completion
+                    # Track completion (with dedup guards — fix #48)
                     if exec_result is not None and exec_result.success:
                         task_graph.mark_completed(task_node.id)
-                        state.completed_tasks.append(task_node.id)
+                        if task_node.id not in state.completed_tasks:
+                            state.completed_tasks.append(task_node.id)
                         _emit(on_activity, "orchestrator", "task_done", f"Task {task_node.id} completed", "success")
                     else:
                         task_graph.mark_failed(task_node.id)
-                        state.failed_tasks.append(task_node.id)
+                        if task_node.id not in state.failed_tasks:
+                            state.failed_tasks.append(task_node.id)
                         _emit(on_activity, "orchestrator", "task_done", f"Task {task_node.id} failed", "error")
+
+                    # Sync task_graph statuses to state dict so resume
+                    # sees correct statuses (fix #58 — was stale on save)
+                    state.task_graph = task_graph.to_dict()
 
                 except Exception as e:
                     # Per-task error handling: mark failed, save state, continue
                     _emit(on_activity, "orchestrator", "error",
                           f"Task {task_node.id} failed with error: {e}", "error")
                     task_graph.mark_failed(task_node.id)
-                    state.failed_tasks.append(task_node.id)
+                    if task_node.id not in state.failed_tasks:
+                        state.failed_tasks.append(task_node.id)
+                    state.task_graph = task_graph.to_dict()  # fix #58
                     _save_with_budget(state, output_dir)
 
                 # Reset reflection for next task

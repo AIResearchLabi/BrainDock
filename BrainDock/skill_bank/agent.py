@@ -45,14 +45,85 @@ class SkillLearningAgent(BaseAgent):
         self,
         task_description: str,
         bank: SkillBank,
+        use_llm: bool = False,
     ) -> list[dict]:
         """Find relevant skills for a task from the skill bank.
+
+        Uses deterministic keyword matching by default (no LLM call).
+        Set use_llm=True to use LLM-based matching for higher accuracy.
 
         Returns a list of dicts with skill_id, relevance, and application.
         """
         if not bank.skills:
             return []
 
+        if use_llm:
+            return self._match_skills_llm(task_description, bank)
+
+        return self._match_skills_heuristic(task_description, bank)
+
+    def _match_skills_heuristic(
+        self,
+        task_description: str,
+        bank: SkillBank,
+    ) -> list[dict]:
+        """Keyword-based skill matching without LLM call.
+
+        Scores skills by overlap between task keywords and skill
+        name/tags/description/category. Returns top matches.
+        """
+        import re as _re
+
+        # Extract keywords from task (3+ char words, lowered)
+        task_words = set(
+            w for w in _re.findall(r"[a-z][a-z0-9_]+", task_description.lower())
+            if len(w) >= 3
+        )
+
+        scored: list[tuple[float, Skill]] = []
+        for skill in bank.skills:
+            # Build searchable text from skill metadata
+            skill_text = " ".join([
+                skill.name.lower(),
+                skill.description.lower(),
+                skill.category.lower(),
+                " ".join(t.lower() for t in skill.tags),
+            ])
+            skill_words = set(
+                w for w in _re.findall(r"[a-z][a-z0-9_]+", skill_text)
+                if len(w) >= 3
+            )
+
+            # Score = overlap count, weighted by reliability
+            overlap = len(task_words & skill_words)
+            if overlap > 0:
+                score = overlap * skill.reliability_score
+                scored.append((score, skill))
+
+        # Sort by score descending, take top 5
+        scored.sort(key=lambda x: x[0], reverse=True)
+        matches = []
+        for score, skill in scored[:5]:
+            if score >= 3:
+                relevance = "high"
+            elif score >= 1.5:
+                relevance = "medium"
+            else:
+                relevance = "low"
+            matches.append({
+                "skill_id": skill.id,
+                "relevance": relevance,
+                "application": f"Apply {skill.name} pattern",
+            })
+
+        return matches
+
+    def _match_skills_llm(
+        self,
+        task_description: str,
+        bank: SkillBank,
+    ) -> list[dict]:
+        """LLM-based skill matching (original implementation)."""
         skills_json = json.dumps(
             [{"id": s.id, "name": s.name, "description": s.description, "tags": s.tags}
              for s in bank.skills],

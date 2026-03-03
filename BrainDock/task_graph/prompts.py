@@ -1,13 +1,14 @@
 """Prompt templates for the Task Graph Agent."""
 
-SYSTEM_PROMPT = """\
+from BrainDock.prompts_common import JSON_FORMAT_INSTRUCTION
+
+SYSTEM_PROMPT = f"""\
 You are an expert project planner who decomposes software projects into \
 well-structured task graphs. You identify dependencies, risks, and \
 parallelization opportunities. Your task breakdowns are actionable, \
 concrete, and follow the project's architecture.
 
-IMPORTANT: Always respond in valid JSON format as specified in each prompt. \
-Do not include any text outside the JSON object."""
+{JSON_FORMAT_INSTRUCTION}"""
 
 
 DECOMPOSE_PROMPT = """\
@@ -26,6 +27,8 @@ Create a directed acyclic graph of implementation tasks. Each task should be:
 Rules:
 - First tasks should be project setup / scaffolding
 - Group related work but keep tasks focused
+- If multiple small tasks (<1 hour) are closely related with no inter-dependencies, \
+merge them into a single medium task to reduce overhead
 - Identify risks for complex or uncertain tasks
 - Mark estimated effort: "small" (< 1 hour), "medium" (1-4 hours), "large" (4+ hours)
 - Use task IDs like "t1", "t2", etc.

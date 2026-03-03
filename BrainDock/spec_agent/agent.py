@@ -344,8 +344,12 @@ class SpecAgent:
                 answers = ask_fn(result.questions, result.decisions, self.understanding)
                 result = self.refine(answers)
             else:
-                # No user questions needed — show decisions only
+                # No user questions needed — skip refine LLM call, show decisions only
                 ask_fn([], result.decisions, self.understanding)
+                result = AnalyzeResult(
+                    decisions=result.decisions, questions=[],
+                    understanding=self.understanding, ready=True,
+                )
 
         # Continue refinement rounds if needed
         while not result.ready:

@@ -22,9 +22,10 @@ def _sanitize_command_for_posix(command: str) -> str:
     # Remove outer grouping parentheses: ( cmd1 && cmd2 ) -> cmd1 && cmd2
     if cmd.startswith("(") and cmd.endswith(")"):
         inner = cmd[1:-1].strip()
-        # Only unwrap if it looks like a simple command group, not a subshell
-        if ";" in inner or "&&" in inner or "||" in inner:
-            cmd = inner
+        # Only unwrap if inner content has balanced parentheses (not nested subshells)
+        if inner.count("(") == inner.count(")"):
+            if ";" in inner or "&&" in inner or "||" in inner:
+                cmd = inner
 
     # Replace [[ ]] with [ ] for test expressions
     cmd = re.sub(r'\[\[(.+?)\]\]', r'[ \1 ]', cmd)
@@ -48,6 +49,14 @@ def run_sandboxed(
         Tuple of (success, output_text).
     """
     command = _sanitize_command_for_posix(command)
+    # Reject commands that look like test output (not actual commands)
+    _first_word = command.strip().split()[0] if command.strip() else ""
+    if _first_word in ("Ran", "All", "OK", "PASSED", "FAILED", "ERROR",
+                        "Traceback", "OK.", "Tests", "Successfully"):
+        return False, (
+            f"Rejected: command starts with '{_first_word}' which looks like "
+            f"test output, not a shell command: {command[:100]!r}"
+        )
     try:
         result = subprocess.run(
             command,
@@ -348,7 +357,9 @@ def write_file_safe(
     project_resolved = Path(project_dir).resolve()
 
     # Safety: ensure the path is within the project directory
-    if not str(resolved).startswith(str(project_resolved)):
+    try:
+        resolved.relative_to(project_resolved)
+    except ValueError:
         return False, f"Path escapes project directory: {file_path}"
 
     # Validate source file content before writing
@@ -382,7 +393,9 @@ def read_file_safe(
     project_resolved = Path(project_dir).resolve()
 
     # Safety: ensure the path is within the project directory
-    if not str(resolved).startswith(str(project_resolved)):
+    try:
+        resolved.relative_to(project_resolved)
+    except ValueError:
         return None
 
     try:
@@ -451,12 +464,12 @@ _ERROR_PATTERNS = [
     r"IndentationError:",
     r"AttributeError:",
     r"npm ERR!",
-    r"Error:",
+    r"^Error:",
     r"FATAL",
     r"Segmentation fault",
 ]
 
-_ERROR_RE = re.compile("|".join(_ERROR_PATTERNS), re.IGNORECASE)
+_ERROR_RE = re.compile("|".join(_ERROR_PATTERNS), re.IGNORECASE | re.MULTILINE)
 
 
 def _detect_entry_point(project_dir: str) -> tuple[str, str]:
@@ -471,6 +484,16 @@ def _detect_entry_point(project_dir: str) -> tuple[str, str]:
     for name in ("main.py", "app.py", "manage.py"):
         if (p / name).is_file():
             return f"python {name}", name
+
+    # Python package with __main__.py
+    for child in p.iterdir():
+        if child.is_dir() and (child / "__main__.py").is_file() and (child / "__init__.py").is_file():
+            return f"python -m {child.name}", f"{child.name}/__main__.py"
+
+    # Python test suite (tests/ directory with test files)
+    tests_dir = p / "tests"
+    if tests_dir.is_dir() and any(tests_dir.rglob("test_*.py")):
+        return "python -m unittest discover -s tests --failfast -q", "tests/"
 
     # package.json scripts
     pkg_json = p / "package.json"

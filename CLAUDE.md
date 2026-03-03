@@ -40,7 +40,7 @@ Modules: spec_agent, task_graph, planner, controller, executor, skill_bank, refl
 
 ## Key Thresholds (RunConfig)
 - `min_confidence`: 0.6 — below triggers reflection
-- `max_entropy`: 0.7 — above triggers debate
+- `max_entropy`: 0.85 — above triggers debate
 - `max_reflection_iterations`: 2 — retries per task
 - `max_debate_rounds`: 3 — debate convergence limit
 - `escalation_token_budget`: 50000 — per-task token limit before human escalation

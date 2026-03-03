@@ -501,7 +501,7 @@ class TestLlmQueryJsonList(unittest.TestCase):
 class TestStopConditionBatchFields(unittest.TestCase):
     def test_defaults(self):
         s = StopCondition()
-        self.assertEqual(s.batch_size, 4)
+        self.assertEqual(s.batch_size, 8)
         self.assertEqual(s.session_token_limit, 8000)
 
     def test_roundtrip(self):
@@ -515,7 +515,7 @@ class TestStopConditionBatchFields(unittest.TestCase):
         """from_dict with missing batch fields uses defaults."""
         s = StopCondition.from_dict({"max_steps": 10})
         self.assertEqual(s.max_steps, 10)
-        self.assertEqual(s.batch_size, 4)
+        self.assertEqual(s.batch_size, 8)
         self.assertEqual(s.session_token_limit, 8000)
 
 
@@ -1078,11 +1078,11 @@ class TestExecutorJsonParseFailureGraceful(unittest.TestCase):
     def test_single_step_already_done_handled_as_skip(self):
         """When LLM returns 'already done' prose for execute_step, treats as skip."""
         def already_done_llm(system_prompt, user_prompt):
-            return "I completed the step. Everything is done."
+            return "The work is already complete. No changes needed."
 
         executor = ExecutorAgent(llm=CallableBackend(already_done_llm))
         step = {"id": "s1", "action": "Write file", "tool": "write_file"}
-        # Should NOT raise — auto-skip detects "complete" in response
+        # Should NOT raise — auto-skip detects "already complete" phrase in response
         outcome = executor.execute_step(step, self._tmpdir, [])
         self.assertTrue(outcome.success)
 

@@ -37,14 +37,19 @@ class ClaudeCLIBackend:
         env.pop("CLAUDECODE", None)
         env.pop("CLAUDE_CODE_ENTRYPOINT", None)
 
-        result = subprocess.run(
-            cmd,
-            input=user_prompt,
-            capture_output=True,
-            text=True,
-            timeout=self.timeout,
-            env=env,
-        )
+        try:
+            result = subprocess.run(
+                cmd,
+                input=user_prompt,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout,
+                env=env,
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(
+                f"claude -p timed out after {self.timeout}s"
+            )
 
         if result.returncode != 0:
             raise RuntimeError(
@@ -54,7 +59,14 @@ class ClaudeCLIBackend:
         try:
             parsed = json.loads(result.stdout)
         except json.JSONDecodeError:
-            # Fallback: return raw output if JSON parsing fails
+            # Fallback: return raw output if JSON parsing fails.
+            # Log so callers can diagnose unexpected non-JSON responses.
+            import sys
+            print(
+                f"  [LLM] JSON parse failed for claude -p output "
+                f"({len(result.stdout)} chars), returning raw text",
+                file=sys.stderr,
+            )
             return result.stdout.strip()
 
         if parsed.get("is_error"):
@@ -165,10 +177,12 @@ def extract_json(text: str) -> dict:
     # Try 4: detect "already done" / summary responses and wrap as skip action
     # This handles cases where the LLM returns a prose summary instead of JSON
     # (e.g., "All steps are complete. Here's a summary...")
+    # Use phrase-level markers to avoid false positives (fix #47)
     _lower = text[:200].lower()
     _already_done_markers = (
-        "already", "complete", "all steps", "already implemented",
-        "already exist", "no changes needed", "nothing to do",
+        "already complete", "already implemented", "already exist",
+        "all steps are complete", "all steps have been", "no changes needed",
+        "nothing to do", "work is already done", "already done",
     )
     if any(marker in _lower for marker in _already_done_markers):
         return {
@@ -247,10 +261,12 @@ def extract_json_or_list(text: str) -> dict | list:
             continue
 
     # Detect "already done" / summary responses and wrap as skip action list
+    # Use phrase-level markers to avoid false positives (fix #47)
     _lower = text[:200].lower()
     _already_done_markers = (
-        "already", "complete", "all steps", "already implemented",
-        "already exist", "no changes needed", "nothing to do",
+        "already complete", "already implemented", "already exist",
+        "all steps are complete", "all steps have been", "no changes needed",
+        "nothing to do", "work is already done", "already done",
     )
     if any(marker in _lower for marker in _already_done_markers):
         return [{

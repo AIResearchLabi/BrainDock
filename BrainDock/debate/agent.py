@@ -123,6 +123,7 @@ class DebateAgent(BaseAgent):
         converged = False
 
         # Step 2: Critique rounds
+        round_num = 0  # default in case proposals is empty
         for round_num in range(1, self.max_rounds + 1):
             critiques, converged, winning_approach, synthesis = self.critique(
                 proposals, context, all_critiques, round_num

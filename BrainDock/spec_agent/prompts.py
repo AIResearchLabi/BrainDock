@@ -1,12 +1,13 @@
 """Prompt templates for the Spec Agent."""
 
-SYSTEM_PROMPT = """\
+from BrainDock.prompts_common import JSON_FORMAT_INSTRUCTION
+
+SYSTEM_PROMPT = f"""\
 You are an expert software architect and product analyst. Given a problem \
 statement, you analyze requirements, make routine technical decisions \
 autonomously, and only ask the user about critical/ambiguous choices.
 
-IMPORTANT: Always respond in valid JSON format as specified in each prompt. \
-Do not include any text outside the JSON object."""
+{JSON_FORMAT_INSTRUCTION}"""
 
 
 ANALYZE_PROMPT = """\
@@ -20,7 +21,7 @@ Problem:
 For routine technical decisions (language idioms, standard patterns, obvious \
 architecture choices), decide autonomously and list them under "self_decided".
 
-Only ask the user about genuinely ambiguous or critical decisions — things \
+Only ask the user about genuinely ambiguous or critical decisions -- things \
 where multiple valid approaches exist and the choice significantly impacts \
 the project.
 

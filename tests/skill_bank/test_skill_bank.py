@@ -264,6 +264,21 @@ class TestSkillLearningAgent(unittest.TestCase):
         self.assertIn("Implement API retry", skill.source_task)
 
     def test_match_skills(self):
+        """Heuristic matching finds skills by keyword overlap."""
+        agent = SkillLearningAgent(llm=make_match_llm())
+        bank = SkillBank()
+        bank.add(Skill(
+            id="skill_retry_with_backoff",
+            name="Retry with Backoff for API error handling",
+            description="Retry failing API client operations with backoff",
+            tags=["resilience", "error-handling", "api"],
+        ))
+        matches = agent.match_skills("Build an API client with error handling", bank)
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["skill_id"], "skill_retry_with_backoff")
+
+    def test_match_skills_llm(self):
+        """LLM-based matching when use_llm=True."""
         agent = SkillLearningAgent(llm=make_match_llm())
         bank = SkillBank()
         bank.add(Skill(
@@ -272,7 +287,9 @@ class TestSkillLearningAgent(unittest.TestCase):
             description="Retry failing ops",
             tags=["resilience"],
         ))
-        matches = agent.match_skills("Build an API client with error handling", bank)
+        matches = agent.match_skills(
+            "Build an API client with error handling", bank, use_llm=True
+        )
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0]["skill_id"], "skill_retry_with_backoff")
         self.assertEqual(matches[0]["relevance"], "high")

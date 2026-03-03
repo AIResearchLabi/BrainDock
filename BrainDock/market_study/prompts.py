@@ -1,13 +1,14 @@
 """Prompt templates for the Market Study Agent."""
 
-SYSTEM_PROMPT = """\
+from BrainDock.prompts_common import JSON_FORMAT_INSTRUCTION
+
+SYSTEM_PROMPT = f"""\
 You are a market research analyst specializing in software products and \
 technology. You analyze competitive landscapes, identify target audiences, \
 and provide strategic recommendations for product positioning. Your analysis \
 is data-driven, actionable, and focused on practical implementation guidance.
 
-IMPORTANT: Always respond in valid JSON format as specified in each prompt. \
-Do not include any text outside the JSON object."""
+{JSON_FORMAT_INSTRUCTION}"""
 
 
 MARKET_STUDY_PROMPT = """\

@@ -1,63 +1,33 @@
 """Prompt templates for the Executor Agent."""
 
-SYSTEM_PROMPT = """\
+from BrainDock.prompts_common import (
+    JSON_FORMAT_INSTRUCTION_STRICT,
+    CONTENT_FIELD_RULE,
+    IMPORT_ISOLATION_RULE,
+    POSIX_SHELL_RULES,
+    TEST_SCOPING_RULE,
+    HUMAN_INTERACTION_RULE,
+    SKIP_ACTION_HINT,
+    PATH_RULES,
+)
+
+SYSTEM_PROMPT = f"""\
 You are an expert code executor. Given an action step from a plan, you produce \
-the exact code or commands needed to execute it. You are precise, careful, and \
-always verify your work.
+the exact code or commands needed to execute it.
 
-CRITICAL: ALWAYS respond in valid JSON format as specified in each prompt. \
-Do not include any text outside the JSON object. NEVER respond with prose, \
-summaries, or explanations outside of JSON.
+{JSON_FORMAT_INSTRUCTION_STRICT}
 
-If a step's work is ALREADY DONE (file already exists with correct content, \
-command already ran, etc.), respond with:
-{{"step_id": "...", "action_type": "skip", "file_path": "", \
-"content": "Work already complete: <brief reason>", "verification": "verified"}}
+{SKIP_ACTION_HINT}
 
-CRITICAL — "content" field rules:
-- For write_file / edit_file actions, the "content" field MUST contain the \
-COMPLETE, LITERAL source code of the file — ready to be saved to disk and \
-executed as-is.
-- NEVER put a natural-language description, summary, or explanation of what \
-the code does in the "content" field. That will be written verbatim to the \
-file and cause SyntaxError.
-- BAD example (NEVER do this): "content": "Wrote a Python module with a \
-User class and login method"
-- GOOD example: "content": "class User:\\n    def login(self):\\n        pass\\n"
-- If the file is long, you MUST still include the full source code. Do not \
-abbreviate, summarise, or describe — write the actual code.
-- NEVER use Unicode characters (arrows →, bullets •, dashes —, smart quotes \
-"") in source code. Use only ASCII characters.
+{CONTENT_FIELD_RULE}
 
-CRITICAL — Import isolation rules:
-- The project is built in an ISOLATED output directory. It is NOT inside \
-the BrainDock package and cannot import BrainDock internals.
-- ONLY import from: (1) Python stdlib, (2) files YOU created in the project, \
-(3) pip packages listed in the project's requirements.txt.
-- NEVER import from BrainDock, braindock, or any parent framework modules.
+{IMPORT_ISOLATION_RULE}
 
-CRITICAL — Shell command rules:
-- For run_command / test actions, "content" MUST be an actual shell command.
-- NEVER put test results, summaries, or descriptions as the command.
-- BAD: "content": "All tests passed successfully"
-- GOOD: "content": "python -m unittest discover -s tests -v"
-- Use STRICTLY POSIX-compatible shell syntax. Generated code may run under \
-/bin/sh, so you MUST avoid ALL bash-specific features:
-  - NO parentheses for grouping: ( cmd1 && cmd2 )
-  - NO [[ ]] double-bracket tests — use [ ] instead
-  - NO arrays: arr=(a b c)
-  - NO process substitution: <(cmd) or >(cmd)
-  - NO $() if avoidable — use backticks or rewrite as separate commands
-  - NO local keyword — use plain variable assignment
-  - NO function keyword — use funcname() {{ ... }}
-- If you need to run multiple commands, use && or ; to chain them.
+{POSIX_SHELL_RULES}
 
-CRITICAL — Test command scoping:
-- For test / run_command steps that run tests, ONLY run tests relevant to \
-the current task's module. NEVER run the full test suite.
-- BAD: "python -m unittest discover -s tests -v" (runs ALL tests, slow)
-- GOOD: "python -m unittest tests.outreach.test_whatsapp -v" (module-scoped)
-- The full test suite can have 500+ tests and will timeout at 300s."""
+{TEST_SCOPING_RULE}
+
+{HUMAN_INTERACTION_RULE}"""
 
 
 EXECUTE_STEP_PROMPT = """\
@@ -82,18 +52,10 @@ Previous step outcomes:
 {previous_outcomes}
 ---
 
-Produce the exact implementation for this step. If the step involves writing \
-code, the "content" field MUST contain the complete, literal source code — \
-NOT a description of it. If it involves running a command, include the exact \
-command. If editing an existing file, provide the complete updated file \
-content (not a diff, not a summary).
+Produce the exact implementation. For write_file/edit_file, content MUST be \
+complete literal source code. For commands, include the exact shell command.
 
-CRITICAL — Path rules:
-- Commands run from the project directory as working directory (cwd).
-- Use RELATIVE paths in commands, NOT absolute paths.
-- BAD: "python /home/user/project/tests/test_foo.py"
-- GOOD: "python -m unittest tests.outreach.test_foo -v"
-- For file_path fields, always use RELATIVE paths from the project root.
+""" + PATH_RULES + """
 
 Respond in this exact JSON format:
 {{
@@ -122,12 +84,11 @@ Current project files:
 
 {edit_file_context}
 
-For EACH step, produce the implementation. The "content" field for \
-write_file/edit_file actions MUST be the complete, literal source code — \
-NEVER a description or summary. For test steps, only run tests for the \
-current task's module (e.g. "python -m unittest tests.outreach.test_whatsapp -v"), \
-NEVER the full test suite. Respond with a JSON ARRAY of action objects, \
-one per step, in order:
+For EACH step, produce the implementation. Content for write_file/edit_file \
+MUST be complete literal source code. For test steps, only run module-scoped \
+tests. For human interaction tasks, write detection/escalation CODE with mocks.
+
+Respond with a JSON ARRAY of action objects, one per step, in order:
 [
   {{"step_id": "...", "action_type": "write_file|run_command|edit_file|create_dir|test",
     "file_path": "...", "content": "...", "verification": "..."}}
@@ -151,9 +112,9 @@ Project directory: {project_dir}
 
 {edit_file_context}
 
-The "content" field for write_file/edit_file MUST be the complete, literal \
-source code — NEVER a description or summary. For test steps, only run \
-tests for the current task's module, NEVER the full test suite.
+Content for write_file/edit_file MUST be complete literal source code. \
+For test steps, only run module-scoped tests. For human interaction tasks, \
+write detection/escalation CODE with mocks.
 
 Respond with a JSON ARRAY of action objects, one per step, in order:
 [
@@ -179,18 +140,13 @@ Project directory: {project_dir}
 
 {existing_file_context}
 
-WHAT WENT WRONG: You returned a natural-language description or summary \
-instead of actual source code. The "content" field was written verbatim to \
-disk and caused an error.
+WHAT WENT WRONG: You returned a description instead of actual source code.
 
 RULES FOR THIS RETRY:
-1. The "content" field MUST contain the COMPLETE, LITERAL source code of \
-the file -- ready to be saved to disk and executed as-is.
+1. "content" MUST contain COMPLETE, LITERAL source code -- ready to execute.
 2. Do NOT describe what the code does. Write the actual code.
-3. If editing an existing file, the "content" MUST be the FULL updated \
-file content (not a diff, not a description of changes).
-4. NEVER use Unicode characters in source code (no arrows, bullets, dashes, \
-smart quotes). ASCII only.
+3. If editing, provide the FULL updated file content (not a diff).
+4. ASCII characters only in source code.
 
 Respond in this exact JSON format:
 {{

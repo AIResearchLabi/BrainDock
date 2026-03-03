@@ -372,8 +372,7 @@ def make_pipeline_llm():
     call_count = {"n": 0}
     responses = [
         SPEC_ANALYZE,    # spec analyze
-        SPEC_REFINE,     # spec refine (run() calls refine even with 0 questions)
-        SPEC_GENERATE,   # spec generate
+        SPEC_GENERATE,   # spec generate (refine skipped when no user questions)
         TASK_GRAPH,      # task graph decompose
         PLAN,            # planner plan_task
         EXEC_WRITE,      # executor execute_step
@@ -391,7 +390,7 @@ def make_pipeline_llm():
 def make_plan_only_llm():
     """Mock LLM for plan-only mode (spec + task_graph + plan only)."""
     call_count = {"n": 0}
-    responses = [SPEC_ANALYZE, SPEC_REFINE, SPEC_GENERATE, TASK_GRAPH]
+    responses = [SPEC_ANALYZE, SPEC_GENERATE, TASK_GRAPH]
 
     def mock_fn(system_prompt, user_prompt):
         idx = min(call_count["n"], len(responses) - 1)
@@ -407,7 +406,8 @@ class TestMode(unittest.TestCase):
     def test_values(self):
         self.assertEqual(Mode.SPECIFICATION.value, "specification")
         self.assertEqual(Mode.DEBATE.value, "debate")
-        self.assertEqual(len(Mode), 8)
+        self.assertEqual(len(Mode), 9)
+        self.assertEqual(Mode.OUTREACH.value, "outreach")
 
 
 class TestRunConfig(unittest.TestCase):
@@ -1070,23 +1070,17 @@ class TestGlobalSkillBankWebApp(unittest.TestCase):
         return CallableBackend(mock_fn)
 
     def _webapp_llm(self, skill_resp=SKILL_JWT_AUTH, captured=None, has_prior_skills=False):
-        seq = [WEBAPP_SPEC_ANALYZE, WEBAPP_SPEC_REFINE, WEBAPP_SPEC_GENERATE, WEBAPP_TASK_GRAPH]
-        if has_prior_skills:
-            seq.append(SKILL_MATCH)
+        seq = [WEBAPP_SPEC_ANALYZE, WEBAPP_SPEC_GENERATE, WEBAPP_TASK_GRAPH]
         seq.extend([WEBAPP_PLAN, WEBAPP_EXEC_WRITE, skill_resp])
         return self._make_llm(seq, captured)
 
     def _shop_llm(self, captured=None, has_prior_skills=False):
-        seq = [WEBAPP_SPEC_ANALYZE, WEBAPP_SPEC_REFINE, SHOP_SPEC_GENERATE, SHOP_TASK_GRAPH]
-        if has_prior_skills:
-            seq.append(SKILL_MATCH)
+        seq = [WEBAPP_SPEC_ANALYZE, SHOP_SPEC_GENERATE, SHOP_TASK_GRAPH]
         seq.extend([SHOP_PLAN, SHOP_EXEC_WRITE, SKILL_REST_CRUD])
         return self._make_llm(seq, captured)
 
     def _form_llm(self, captured=None, has_prior_skills=False):
-        seq = [WEBAPP_SPEC_ANALYZE, WEBAPP_SPEC_REFINE, FORM_SPEC_GENERATE, FORM_TASK_GRAPH]
-        if has_prior_skills:
-            seq.append(SKILL_MATCH)
+        seq = [WEBAPP_SPEC_ANALYZE, FORM_SPEC_GENERATE, FORM_TASK_GRAPH]
         seq.extend([FORM_PLAN, FORM_EXEC_WRITE, SKILL_FORM_VALIDATION])
         return self._make_llm(seq, captured)
 
@@ -1278,7 +1272,7 @@ class TestSkillsSavedIncrementally(unittest.TestCase):
         file_existed_after_skill_call = {"value": False}
         call_count = {"n": 0}
         responses = [
-            SPEC_ANALYZE, SPEC_REFINE, SPEC_GENERATE,
+            SPEC_ANALYZE, SPEC_GENERATE,
             TASK_GRAPH, PLAN, EXEC_WRITE, SKILL_EXTRACT,
         ]
 

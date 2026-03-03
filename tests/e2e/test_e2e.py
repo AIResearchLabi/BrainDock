@@ -50,7 +50,7 @@ class TestE2EHappyPath(unittest.TestCase):
 
     def test_full_pipeline_produces_complete_state(self):
         # LLM call sequence:
-        #   spec_analyze, spec_refine, spec_generate,
+        #   spec_analyze, spec_generate (refine skipped when no questions),
         #   task_graph,
         #   plan (confidence=0.9),
         #   execute (write main.py with valid content),
@@ -294,7 +294,7 @@ class TestE2EDebatePath(unittest.TestCase):
         llm = make_sequenced_llm([
             *make_spec_responses(),                          # 0-2: spec
             make_task_graph(),                               # 3: task graph
-            make_plan(confidence=0.9, entropy=0.8),          # 4: plan with high entropy
+            make_plan(confidence=0.9, entropy=0.9),          # 4: plan with high entropy (> 0.85 threshold)
             *make_debate_responses(),                        # 5-7: propose, critique, synthesize
             make_exec_batch([{                               # 8: execute improved plan
                 "step_id": "s1_debated",
@@ -369,9 +369,8 @@ class TestE2EMultipleTasks(unittest.TestCase):
                 "verification": "",
             }]),
             make_skill("skill_core"),                        # 6: skill t1
-            # Task t2 (bank now has skill_core, so match_skills runs)
-            make_skill_match(),                               # 7: match_skills for t2
-            make_plan(task_id="t2", task_title="Create CLI wrapper"),  # 8: plan t2
+            # Task t2 (skill matching is now heuristic, no LLM call)
+            make_plan(task_id="t2", task_title="Create CLI wrapper"),  # 7: plan t2
             make_exec_batch([{                               # 8: execute t2
                 "step_id": "s1",
                 "action_type": "write_file",
@@ -453,8 +452,8 @@ class TestE2EGuidanceInjection(unittest.TestCase):
         self.assertGreater(guidance_drained["count"], 0)
 
         # Guidance text reached the planner's LLM prompt
-        # The planner call is index 4 (after spec[0-2] + task_graph[3])
-        planner_prompt = llm.user_prompts[4]
+        # The planner call is index 3 (after spec[0-1] + task_graph[2])
+        planner_prompt = llm.user_prompts[3]
         self.assertIn("PostgreSQL", planner_prompt)
 
         # Activity log contains guidance event

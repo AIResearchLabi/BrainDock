@@ -1,12 +1,13 @@
 """Prompt templates for the Skill Learning Agent."""
 
-SYSTEM_PROMPT = """\
+from BrainDock.prompts_common import JSON_FORMAT_INSTRUCTION
+
+SYSTEM_PROMPT = f"""\
 You are a software engineering expert that extracts reusable patterns and skills \
 from successful task completions. Your job is to identify the core transferable \
 technique so it can be applied to future tasks.
 
-IMPORTANT: Always respond in valid JSON format as specified in each prompt. \
-Do not include any text outside the JSON object."""
+{JSON_FORMAT_INSTRUCTION}"""
 
 
 EXTRACT_SKILL_PROMPT = """\

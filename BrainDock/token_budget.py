@@ -89,19 +89,19 @@ class TokenBudgetTracker:
             self._agent_totals[agent]["input"] += input_tokens
             self._agent_totals[agent]["output"] += output_tokens
 
-            # Check global thresholds
+            # Check global thresholds — collect callbacks to fire AFTER
+            # releasing the lock to avoid blocking other threads.
+            _pending_callbacks: list[tuple[str, str, int, int]] = []
             global_used = self._global_input + self._global_output
             global_budget = self._config.global_token_budget
             if global_budget > 0:
                 pct = global_used / global_budget
                 if pct >= self._config.pause_pct and not self._global_pause_fired:
                     self._global_pause_fired = True
-                    if self._on_threshold:
-                        self._on_threshold("pause", "global", global_used, global_budget)
+                    _pending_callbacks.append(("pause", "global", global_used, global_budget))
                 elif pct >= self._config.warn_pct and not self._global_warn_fired:
                     self._global_warn_fired = True
-                    if self._on_threshold:
-                        self._on_threshold("warn", "global", global_used, global_budget)
+                    _pending_callbacks.append(("warn", "global", global_used, global_budget))
 
             # Check task thresholds
             task_used = self._task_input + self._task_output
@@ -110,12 +110,15 @@ class TokenBudgetTracker:
                 pct = task_used / task_budget
                 if pct >= self._config.pause_pct and not self._task_pause_fired:
                     self._task_pause_fired = True
-                    if self._on_threshold:
-                        self._on_threshold("pause", "task", task_used, task_budget)
+                    _pending_callbacks.append(("pause", "task", task_used, task_budget))
                 elif pct >= self._config.warn_pct and not self._task_warn_fired:
                     self._task_warn_fired = True
-                    if self._on_threshold:
-                        self._on_threshold("warn", "task", task_used, task_budget)
+                    _pending_callbacks.append(("warn", "task", task_used, task_budget))
+
+        # Fire threshold callbacks outside the lock to prevent deadlock
+        if self._on_threshold:
+            for level, scope, used, budget in _pending_callbacks:
+                self._on_threshold(level, scope, used, budget)
 
     def start_task(self, task_id: str) -> None:
         """Start tracking a new task, resetting per-task counters.

@@ -61,8 +61,8 @@ def make_spec_generate() -> str:
 
 
 def make_spec_responses() -> list[str]:
-    """Return the standard 3-call spec sequence: analyze → refine → generate."""
-    return [make_spec_analyze(), make_spec_refine(), make_spec_generate()]
+    """Return the spec sequence: analyze → generate (refine skipped when no questions)."""
+    return [make_spec_analyze(), make_spec_generate()]
 
 
 # ── Task Graph response ───────────────────────────────────────────────
